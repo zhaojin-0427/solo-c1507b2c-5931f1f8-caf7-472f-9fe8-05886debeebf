@@ -1,0 +1,222 @@
+/* style.css — 铅条分格校样工具 */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: 14px/1.5 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: #2b2b2b; background: #f4f2ee; overflow: hidden;
+}
+button {
+  font: inherit; border: 1px solid #c9c4ba; background: #fff; border-radius: 6px;
+  padding: 4px 12px; cursor: pointer;
+}
+button:hover { background: #f0ede6; }
+button.mini { padding: 1px 8px; font-size: 12px; border-radius: 4px; }
+button.danger { color: #b03030; border-color: #d8a8a8; }
+input, select { font: inherit; padding: 2px 6px; border: 1px solid #c9c4ba; border-radius: 4px; }
+input[type="number"] { width: 72px; }
+.muted { color: #8a857a; font-size: 12px; }
+.spacer { flex: 1; }
+
+/* ---------- 顶栏 ---------- */
+#topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; background: #3d3831; color: #f0ede6;
+}
+#topbar .logo { font-weight: 700; letter-spacing: 1px; }
+#topbar input#projName {
+  background: #524c43; color: #fff; border: 1px solid #6b6459; width: 180px;
+}
+#topbar .muted { color: #b8b2a6; }
+#topbar button { background: #524c43; color: #f0ede6; border-color: #6b6459; }
+#topbar button:hover { background: #655e52; }
+.badge { padding: 1px 10px; border-radius: 10px; font-size: 12px; }
+.badge.ok { background: #2f6b3a; color: #dff3e2; }
+.badge.warn { background: #8a6d1f; color: #f7ecc8; }
+.badge.bad { background: #8c2f2f; color: #f6dcdc; }
+
+/* ---------- 主区 ---------- */
+#main { display: flex; height: calc(100vh - 45px); }
+#toolbar {
+  width: 64px; background: #ece9e2; border-right: 1px solid #d5d0c6;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 6px;
+}
+#toolbar button {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 6px 2px; font-size: 16px; line-height: 1.1;
+}
+#toolbar button span { font-size: 11px; }
+#toolbar button.active { background: #3d3831; color: #f0ede6; border-color: #3d3831; }
+#toolbar hr { width: 100%; border: none; border-top: 1px solid #d5d0c6; margin: 4px 0; }
+
+#canvasWrap { flex: 1; position: relative; background: #faf9f6; }
+#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+#toolHint {
+  position: absolute; left: 10px; bottom: 8px; pointer-events: none;
+  background: rgba(61, 56, 49, .85); color: #f0ede6; font-size: 12px;
+  padding: 3px 10px; border-radius: 10px;
+}
+
+/* ---------- 画布元素 ---------- */
+.grid10 { stroke: #e8e4dc; stroke-width: .5; vector-effect: non-scaling-stroke; }
+.grid100 { stroke: #d8d2c6; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.panel-bg { fill: #fff; stroke: none; }
+.piece { fill-opacity: .45; stroke: none; cursor: pointer; }
+.piece.sel { fill-opacity: .65; stroke: #2f6bd8; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.piece-num {
+  text-anchor: middle; dominant-baseline: central; fill: #333;
+  font-weight: 700; pointer-events: none; user-select: none;
+}
+.piece-grain { stroke: rgba(40, 40, 40, .45); stroke-width: 1.2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.bar { stroke: #8a6f4d; stroke-width: 5; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.bar.sel { stroke: #2f6bd8; }
+.hit { stroke: transparent; stroke-width: 12; vector-effect: non-scaling-stroke; fill: none; cursor: pointer; }
+.edge-band { fill: none; stroke-linecap: round; opacity: .28; pointer-events: none; }
+.edge-band.edge-lead { stroke: #6b6558; }
+.edge-band.edge-frame { stroke: #3d3831; opacity: .45; }
+.edge-band.sel { stroke: #2f6bd8; opacity: .5; }
+.edge-core { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.edge-core.edge-lead { stroke: #4a453c; }
+.edge-core.edge-frame { stroke: #22201c; stroke-width: 2; }
+.edge-core.sel { stroke: #2f6bd8; stroke-width: 2.4; }
+.node { fill: #fff; stroke: #4a453c; stroke-width: 1.4; vector-effect: non-scaling-stroke; cursor: move; }
+.node.sel { fill: #2f6bd8; stroke: #2f6bd8; }
+.node.dangling { fill: #ffd9d9; stroke: #c0392b; }
+.draft { fill: none; stroke: #2f6bd8; stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-dasharray: 6 4; }
+.draft-pt { fill: #2f6bd8; }
+.draft-rect { fill: rgba(47, 107, 216, .08); stroke: #2f6bd8; stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-dasharray: 6 4; }
+.snap-ind { fill: none; stroke: #e67e22; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.issue { fill: rgba(255, 240, 180, .9); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
+.issue.error { stroke: #c0392b; }
+.issue.warn { stroke: #b8860b; }
+.issue-t { text-anchor: middle; fill: #c0392b; font-weight: 700; pointer-events: none; }
+.flash {
+  fill: none; stroke: #e67e22; stroke-width: 3; vector-effect: non-scaling-stroke;
+  animation: flashPulse .7s ease-in-out infinite alternate;
+}
+@keyframes flashPulse { from { opacity: 1; } to { opacity: .25; } }
+.step-hl { stroke: #9b59b6; stroke-width: 6; vector-effect: non-scaling-stroke; opacity: .7; stroke-linecap: round; }
+.step-hl-poly { fill: rgba(155, 89, 182, .25); stroke: #9b59b6; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.step-hl-node { fill: rgba(155, 89, 182, .35); stroke: #9b59b6; stroke-width: 2; vector-effect: non-scaling-stroke; }
+
+/* ---------- 侧栏 ---------- */
+#sidebar {
+  width: 320px; background: #fff; border-left: 1px solid #d5d0c6;
+  display: flex; flex-direction: column;
+}
+.tabs { display: flex; border-bottom: 1px solid #d5d0c6; }
+.tab-btn { flex: 1; border: none; border-radius: 0; padding: 8px 0; background: #ece9e2; }
+.tab-btn.active { background: #fff; font-weight: 700; border-bottom: 2px solid #3d3831; }
+.tab-page { display: none; flex: 1; overflow-y: auto; padding: 10px; }
+.tab-page.active { display: block; }
+.pane-note { font-size: 12px; color: #8a857a; margin-bottom: 8px; }
+.empty { color: #8a857a; padding: 8px 4px; }
+
+.issue-item {
+  border: 1px solid #e0dccc; border-left-width: 4px; border-radius: 6px;
+  padding: 6px 8px; margin-bottom: 6px; cursor: pointer; font-size: 13px;
+}
+.issue-item:hover { background: #faf7ef; }
+.issue-item.active { outline: 2px solid #e67e22; }
+.issue-item.error { border-left-color: #c0392b; }
+.issue-item.warn { border-left-color: #b8860b; }
+.issue-item .mini { float: right; }
+
+#piecePanel label, #tab-settings label {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin: 6px 0;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-block; min-width: 28px; text-align: center;
+  border: 2px solid #ccc; border-radius: 6px; padding: 2px 6px; cursor: pointer;
+}
+.chip:hover { background: #f0ede6; }
+fieldset { border: 1px solid #e0dccc; border-radius: 6px; margin-bottom: 12px; }
+legend { font-size: 12px; color: #8a857a; }
+
+/* ---------- 次序面板 ---------- */
+.seq-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+#seqStatus { margin: 4px 0 8px; font-size: 13px; }
+.ok-text { color: #2f6b3a; }
+.bad-text { color: #b03030; }
+.seq-step {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid #e6e2d8; border-radius: 6px; padding: 3px 6px; margin-bottom: 4px;
+  cursor: pointer; font-size: 13px; background: #fff;
+}
+.seq-step:hover { background: #faf7ef; }
+.seq-step.bad { border-color: #c0392b; background: #fdf0ef; }
+.seq-idx { width: 24px; text-align: right; color: #8a857a; font-size: 12px; }
+.seq-icon { width: 18px; text-align: center; }
+.seq-label { flex: 1; }
+.vio {
+  border: 1px solid #e6b8b2; background: #fdf0ef; border-radius: 6px;
+  padding: 5px 8px; margin-bottom: 5px; font-size: 12.5px; cursor: pointer; color: #8c2f2f;
+}
+
+/* ---------- 提示 ---------- */
+#toast {
+  position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
+  background: #3d3831; color: #f0ede6; padding: 8px 18px; border-radius: 8px;
+  opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 60;
+}
+#toast.show { opacity: .95; }
+
+/* ---------- 项目弹窗 ---------- */
+.modal {
+  position: fixed; inset: 0; background: rgba(40, 36, 30, .45);
+  display: none; align-items: center; justify-content: center; z-index: 50;
+}
+.modal.show { display: flex; }
+.modal-box {
+  background: #fff; border-radius: 10px; padding: 16px; width: 520px;
+  max-height: 70vh; overflow-y: auto;
+}
+.modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.modal-actions { display: flex; gap: 8px; margin-bottom: 12px; }
+.proj-item {
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid #eee; padding: 7px 2px;
+}
+.proj-name { flex: 1; font-weight: 600; }
+
+/* ---------- 纸样预览 ---------- */
+#printOverlay {
+  position: fixed; inset: 0; background: #e8e4dc; z-index: 40;
+  display: none; flex-direction: column;
+}
+#printOverlay.show { display: flex; }
+.print-head {
+  display: flex; align-items: center; gap: 12px;
+  background: #3d3831; color: #f0ede6; padding: 8px 14px;
+}
+.print-head button { background: #524c43; color: #f0ede6; border-color: #6b6459; }
+#printPages { flex: 1; overflow: auto; padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.print-page {
+  background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .25);
+  overflow: hidden; flex: none;
+}
+.print-page svg { display: block; }
+
+/* 纸样 SVG 内部样式（单位 = mm） */
+.print-page .frame-outline { fill: none; stroke: #000; stroke-width: .5; }
+.print-page .centerline { stroke: #999; stroke-width: .2; stroke-dasharray: 3 2; }
+.print-page .cut { fill-opacity: .18; stroke: #000; stroke-width: .35; }
+.print-page .pnum { text-anchor: middle; dominant-baseline: central; font-weight: 700; fill: #000; }
+.print-page .grain { stroke: #000; stroke-width: .4; fill: none; }
+.print-page .trim { fill: none; stroke: #c0392b; stroke-width: .3; stroke-dasharray: 6 3; }
+.print-page .overlap { fill: rgba(192, 57, 43, .07); stroke: none; }
+.print-page .reg { stroke: #c0392b; stroke-width: .3; }
+.print-page .plabel { font-size: 4mm; fill: #555; }
+.print-page .calib { fill: none; stroke: #2f6bd8; stroke-width: .3; }
+.print-page .calib-label { font-size: 3.2mm; fill: #2f6bd8; }
+
+@media print {
+  body { overflow: visible; background: #fff; }
+  #topbar, #main, #toast, .print-head { display: none !important; }
+  #printOverlay { position: static; display: block !important; background: #fff; }
+  #printPages { overflow: visible; padding: 0; display: block; }
+  .print-page {
+    box-shadow: none; margin: 0; page-break-after: always; break-after: page;
+  }
+}
