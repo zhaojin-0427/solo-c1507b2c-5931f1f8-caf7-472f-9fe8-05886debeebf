@@ -271,6 +271,9 @@
     if (!d.sequence.custom || !d.sequence.steps.length) {
       d.sequence.steps = LG.seq.generate(d, st().facePieces, d.sequence.startCorner);
       d.sequence.custom = false;
+    } else {
+      // 手动次序：几何可能已变化，调和步骤使其覆盖当前全部铅条/玻璃片
+      LG.seq.reconcile(d, st().facePieces);
     }
     return d.sequence.steps;
   }
@@ -324,19 +327,7 @@
       row.addEventListener("click", () => {
         st().stepHighlight = [s];
         LG.editor.render();
-        // 定位到该步目标
-        const d2 = doc();
-        if (s.type === "lead") {
-          const e = d2.edges.find((x) => x.id === s.ref);
-          const a = e && d2.nodes.find((n) => n.id === e.a), b = e && d2.nodes.find((n) => n.id === e.b);
-          if (a && b) LG.editor.locate((a.x + b.x) / 2, (a.y + b.y) / 2);
-        } else if (s.type === "piece") {
-          const fp = st().facePieces.find((x) => x.piece && x.piece.id === s.ref);
-          if (fp) LG.editor.locate(fp.face.cx, fp.face.cy);
-        } else {
-          const n = d2.nodes.find((x) => x.id === s.ref);
-          if (n) LG.editor.locate(n.x, n.y);
-        }
+        locateStepTarget(s);
       });
       box.appendChild(row);
     });
@@ -349,16 +340,40 @@
           const p = doc().pieces.find((x) => x.id === v.pieceId);
           extra = `（被挡：片 ${p ? p.num : "?"}）`;
         }
-        return `<div class="vio" data-vstep="${v.stepIndex}">⚠ ${v.msg}${extra}</div>`;
+        return `<div class="vio" data-vstep="${v.stepIndex != null ? v.stepIndex : ""}" data-vio='${JSON.stringify({ t: v.type, e: v.edgeId || "", p: v.pieceId || "", n: v.nodeId || "" })}'>⚠ ${v.msg}${extra}</div>`;
       })
       .join("");
     vb.querySelectorAll(".vio").forEach((dEl) =>
       dEl.addEventListener("click", () => {
-        const idx = parseInt(dEl.dataset.vstep);
-        const s = doc().sequence.steps[idx];
-        if (s) { st().stepHighlight = [s]; LG.editor.render(); }
+        const meta = JSON.parse(dEl.dataset.vio);
+        const idx = dEl.dataset.vstep === "" ? -1 : parseInt(dEl.dataset.vstep);
+        let target = null;
+        if (idx >= 0) target = doc().sequence.steps[idx];
+        else if (meta.e) target = { type: "lead", ref: meta.e };
+        else if (meta.p) target = { type: "piece", ref: meta.p };
+        else if (meta.n) target = { type: "solder", ref: meta.n };
+        if (target) {
+          st().stepHighlight = [target];
+          LG.editor.render();
+          locateStepTarget(target);
+        }
       })
     );
+  }
+
+  function locateStepTarget(s) {
+    const d2 = doc();
+    if (s.type === "lead") {
+      const e = d2.edges.find((x) => x.id === s.ref);
+      const a = e && d2.nodes.find((n) => n.id === e.a), b = e && d2.nodes.find((n) => n.id === e.b);
+      if (a && b) LG.editor.locate((a.x + b.x) / 2, (a.y + b.y) / 2);
+    } else if (s.type === "piece") {
+      const fp = st().facePieces.find((x) => x.piece && x.piece.id === s.ref);
+      if (fp) LG.editor.locate(fp.face.cx, fp.face.cy);
+    } else {
+      const n = d2.nodes.find((x) => x.id === s.ref);
+      if (n) LG.editor.locate(n.x, n.y);
+    }
   }
 
   function moveStep(i, dir) {

@@ -79,6 +79,37 @@ section("minWidth / reflexVertices / insetPolygon");
   ok(!tiny.ok, "内缩 20mm 超过半宽 → 判定无效");
 }
 
+section("轮廓方向一致性：顺时针 vs 逆时针");
+{
+  const cwRect = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 30 }, { x: 0, y: 30 }];
+  const ccwRect = [{ x: 0, y: 0 }, { x: 0, y: 30 }, { x: 100, y: 30 }, { x: 100, y: 0 }];
+  const insCW = LG.g.insetPolygon(cwRect, 5);
+  const insCCW = LG.g.insetPolygon(ccwRect, 5);
+  ok(insCW.ok && insCCW.ok, "两种方向都可内缩（不再误报无有效裁切区域）");
+  ok(Math.abs(LG.g.minWidth(insCCW.poly).d - 20) < 1e-6,
+    `CCW 内缩净宽也是 20（实际 ${insCCW.ok ? LG.g.minWidth(insCCW.poly).d : "N/A"}）`);
+  // 内缩顶点应一致（集合相同）
+  const key = (p) => p.map((q) => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).sort().join(";");
+  ok(key(insCW.poly) === key(insCCW.poly), "两种方向内缩顶点集合相同");
+  // 逆时针凹多边形的内凹角
+  const ccwConcave = [{ x: 0, y: 0 }, { x: 0, y: 100 }, { x: 50, y: 50 }, { x: 100, y: 100 }, { x: 100, y: 0 }];
+  const r2 = LG.g.reflexVertices(ccwConcave, 0);
+  ok(r2.length === 1 && Math.abs(r2[0].deg - 270) < 1e-6, `CCW 凹多边形内凹角 270°（实际 ${r2.length ? r2[0].deg : "无"}）`);
+  // 逆时针凸三角形：内角都 < 180，不应误报
+  const ccwTri = [{ x: 0, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 0 }];
+  ok(LG.g.reflexVertices(ccwTri, 0).length === 0, "CCW 凸三角形无误报内凹角");
+  // 逆时针矩形净尺寸检查不应误报
+  const docCCW = {
+    settings: { heartWidth: 1.2, grindAllowance: 1.5, minGlassWidth: 25, minCutSize: 8, reflexTol: 5 },
+    nodes: ccwRect.map((p, i) => ({ id: "v" + i, x: p.x, y: p.y })),
+    edges: [0, 1, 2, 3].map((i) => ({ id: "e" + i, a: "v" + i, b: "v" + ((i + 1) % 4), kind: "frame" })),
+  };
+  const fpCCW = LG.g.extractFaces(docCCW.nodes, docCCW.edges).pieces
+    .map((face) => ({ face, piece: { id: "p", num: 1 } }));
+  const issCCW = LG.checks.run(docCCW, fpCCW);
+  ok(!issCCW.some((i) => i.type === "undersize"), "CCW 矩形片不误报净尺寸不足");
+}
+
 section("checks：五类问题");
 {
   const doc = gridDoc();
@@ -106,15 +137,23 @@ section("checks：五类问题");
     "检出边穿过节点 c 但未连接");
 }
 {
-  // 过窄玻璃：加一条距横线 10mm 的平行线 → 产生 10mm 窄片
+  // 过窄玻璃：在左边框与竖铅条之间连一条距横线 10mm 的平行线 → 闭合出 10mm 窄片
   const doc = gridDoc();
   doc.nodes.push({ id: "n1", x: 0, y: 390 }, { id: "n2", x: 300, y: 390 });
-  doc.edges.push({ id: "e_n", a: "n1", b: "n2", kind: "lead" });
+  const ei = doc.edges.findIndex((e) => e.id === "e_ml_tl");
+  doc.edges.splice(ei, 1);
+  doc.edges.push({ id: "e_ml_n1", a: "ml", b: "n1", kind: "frame" });
+  doc.edges.push({ id: "e_n1_tl", a: "n1", b: "tl", kind: "frame" });
+  const ej = doc.edges.findIndex((e) => e.id === "e_tm_c");
+  doc.edges.splice(ej, 1);
+  doc.edges.push({ id: "e_tm_n2", a: "tm", b: "n2", kind: "lead" });
+  doc.edges.push({ id: "e_n2_c", a: "n2", b: "c", kind: "lead" });
+  doc.edges.push({ id: "e_n1_n2", a: "n1", b: "n2", kind: "lead" });
   const faces = LG.g.extractFaces(doc.nodes, doc.edges);
   const fp = faces.pieces.map((face) => ({ face, piece: { id: "p", num: 1 } }));
   const issues = LG.checks.run(doc, fp);
-  ok(issues.some((i) => i.type === "narrow"), "检出过窄玻璃");
-  ok(issues.some((i) => i.type === "dangling"), "窄线端头悬空也被检出");
+  ok(issues.some((i) => i.type === "narrow"), "检出过窄玻璃（10mm 窄片）");
+  ok(!issues.some((i) => i.type === "dangling"), "窄片闭合后无悬空端点");
 }
 {
   // 内凹角 + 扣除铅芯后不足
@@ -169,6 +208,55 @@ section("sequence：自动生成无违规；手动封片被指出");
   ok(v2.some((x) => x.type === "sealed" && x.pieceId === "p0"), "封片违规被检出并指向 p0");
   const sealed = v2.find((x) => x.type === "sealed");
   ok(sealed && sealed.edgeId, "违规指出了封口的铅条: " + (sealed && sealed.edgeId));
+}
+
+section("sequence：几何变化后调和手动次序");
+{
+  const doc = gridDoc();
+  const buildFP = () =>
+    LG.g.extractFaces(doc.nodes, doc.edges).pieces.map((face, i) => {
+      // 模拟主程序的片身份保持：按质心匹配回旧片
+      return { face, piece: null };
+    });
+  // 初始：生成并转手动
+  let fp = buildFP();
+  doc.pieces = fp.map((m, i) => ({ id: "p" + i, num: i + 1, color: "#abc", grain: 0, cx: m.face.cx, cy: m.face.cy }));
+  fp = LG.g.matchPieces(LG.g.extractFaces(doc.nodes, doc.edges).pieces, doc.pieces);
+  doc.sequence = { startCorner: "tl", steps: LG.seq.generate(doc, fp, "tl"), custom: true };
+
+  // 几何变化1：拆分一根铅条（模拟 splitEdge）→ 旧边删除，两条新边产生
+  const victim = doc.edges.find((e) => e.id === "e_tm_c");
+  doc.edges.splice(doc.edges.indexOf(victim), 1);
+  doc.nodes.push({ id: "mid1", x: 300, y: 200 });
+  doc.edges.push({ id: "e_tm_mid1", a: "tm", b: "mid1", kind: "lead" });
+  doc.edges.push({ id: "e_mid1_c", a: "mid1", b: "c", kind: "lead" });
+  fp = LG.g.matchPieces(LG.g.extractFaces(doc.nodes, doc.edges).pieces, doc.pieces);
+
+  // 调和前：旧步骤引用已删除的 e_tm_c，且新边无步骤 → validate 应报 missing
+  const vBefore = LG.seq.validate(doc, fp, doc.sequence.steps);
+  ok(vBefore.some((x) => x.type === "missing"), "调和前检出缺项（missing）");
+
+  // 调和
+  LG.seq.reconcile(doc, fp);
+  const steps2 = doc.sequence.steps;
+  const leadRefs = new Set(steps2.filter((s) => s.type === "lead").map((s) => s.ref));
+  ok(!leadRefs.has("e_tm_c"), "已删除边的放铅步骤被移除");
+  ok(leadRefs.has("e_tm_mid1") && leadRefs.has("e_mid1_c"), "两条新边都补了放铅步骤");
+  ok(doc.edges.every((e) => leadRefs.has(e.id)), "次序覆盖当前全部铅条");
+  const solderRefs = new Set(steps2.filter((s) => s.type === "solder").map((s) => s.ref));
+  ok(solderRefs.has("mid1"), "新节点补了焊点步骤");
+  const vAfter = LG.seq.validate(doc, fp, steps2);
+  ok(!vAfter.some((x) => x.type === "missing"), "调和后无缺项");
+  ok(vAfter.length === 0, `调和后无其他违规（实际 ${vAfter.map((x) => x.type).join()}）`);
+
+  // 几何变化2：删除一根铅条（e_ml_c 及其孤立节点不动）→ 对应步骤应被清理
+  const victim2 = doc.edges.find((e) => e.id === "e_ml_c");
+  doc.edges.splice(doc.edges.indexOf(victim2), 1);
+  fp = LG.g.matchPieces(LG.g.extractFaces(doc.nodes, doc.edges).pieces, doc.pieces);
+  LG.seq.reconcile(doc, fp);
+  const leadRefs2 = new Set(doc.sequence.steps.filter((s) => s.type === "lead").map((s) => s.ref));
+  ok(!leadRefs2.has("e_ml_c"), "被删铅条的步骤被清理");
+  ok(doc.edges.every((e) => leadRefs2.has(e.id)), "删除后仍覆盖全部铅条");
 }
 
 section("print：分页计算");

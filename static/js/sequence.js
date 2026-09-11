@@ -176,7 +176,8 @@
   /* 校验手动次序：
    * - sealed：某根铅条装好后，某片未装玻璃的所有边界铅条都已就位 → 玻璃被封死
    * - noSupport：嵌片时该片四周没有任何已装铅条可依托
-   * - earlySolder：焊点排在它涉及的铅条装好之前 */
+   * - earlySolder：焊点排在它涉及的铅条装好之前
+   * - missing：当前铅条/玻璃片在次序中缺少对应步骤 */
   function validate(doc, facePieces, steps) {
     const placed = new Set();
     const inserted = new Set();
@@ -195,8 +196,10 @@
       (nodeEdges[e.b] = nodeEdges[e.b] || []).push(e.id);
     });
 
+    const coveredLead = new Set(), coveredPiece = new Set();
     steps.forEach((st, idx) => {
       if (st.type === "lead") {
+        coveredLead.add(st.ref);
         placed.add(st.ref);
         Object.entries(boundaryOf).forEach(([pid, edges]) => {
           if (inserted.has(pid)) return;
@@ -208,6 +211,7 @@
           }
         });
       } else if (st.type === "piece") {
+        coveredPiece.add(st.ref);
         const edges = boundaryOf[st.ref] || [];
         if (!edges.some((e) => placed.has(e))) {
           violations.push({
@@ -227,8 +231,100 @@
         }
       }
     });
+
+    // 覆盖检查：次序必须覆盖当前全部铅条与玻璃片
+    doc.edges.forEach((e) => {
+      if (!coveredLead.has(e.id))
+        violations.push({ type: "missing", edgeId: e.id,
+          msg: `铅条（${e.kind === "frame" ? "外框边" : "内部"}）缺少放铅步骤` });
+    });
+    (facePieces || []).forEach((fp) => {
+      if (fp.piece && !coveredPiece.has(fp.piece.id))
+        violations.push({ type: "missing", pieceId: fp.piece.id,
+          msg: `片 ${pieceNum(fp.piece.id)} 缺少嵌片步骤` });
+    });
     return violations;
   }
 
-  LG.seq = { generate, validate, pieceOrder, cornerPoint };
+  /* 几何变化后调和已保存的手动次序：
+   * 1) 删除引用已不存在的边/片/节点的步骤并去重
+   * 2) 新铅条补放铅步骤：插到相邻最早嵌片步骤之前（无相邻片则附末尾）
+   * 3) 新玻璃片补嵌片步骤：插到其边界最后一根放铅步骤之前（保留敞口边）
+   * 4) 新节点补焊点步骤：插到相连铅条全部就位之后 */
+  function reconcile(doc, facePieces) {
+    const seq = doc.sequence;
+    const steps = Array.isArray(seq.steps) ? seq.steps : [];
+    const edgeIds = new Set(doc.edges.map((e) => e.id));
+    const pieceIds = new Set(doc.pieces.map((p) => p.id));
+    const nodeIds = new Set(doc.nodes.map((n) => n.id));
+
+    const seen = new Set();
+    const kept = [];
+    steps.forEach((s) => {
+      const okRef =
+        (s.type === "lead" && edgeIds.has(s.ref)) ||
+        (s.type === "piece" && pieceIds.has(s.ref)) ||
+        (s.type === "solder" && nodeIds.has(s.ref));
+      const k = s.type + "|" + s.ref;
+      if (okRef && !seen.has(k)) { seen.add(k); kept.push(s); }
+    });
+
+    const boundaryOf = {};
+    (facePieces || []).forEach((fp) => {
+      if (fp.piece) boundaryOf[fp.piece.id] = [...new Set(fp.face.edgeIds)];
+    });
+    const edgePieces = {};
+    Object.entries(boundaryOf).forEach(([pid, eids]) =>
+      eids.forEach((e) => (edgePieces[e] = edgePieces[e] || []).push(pid))
+    );
+
+    // 补放铅步骤
+    const haveLead = new Set(kept.filter((s) => s.type === "lead").map((s) => s.ref));
+    doc.edges.forEach((e) => {
+      if (haveLead.has(e.id)) return;
+      const pids = edgePieces[e.id] || [];
+      let idx = -1;
+      for (let i = 0; i < kept.length; i++) {
+        if (kept[i].type === "piece" && pids.indexOf(kept[i].ref) >= 0) { idx = i; break; }
+      }
+      const step = { type: "lead", ref: e.id };
+      if (idx >= 0) kept.splice(idx, 0, step); else kept.push(step);
+    });
+
+    // 补嵌片步骤
+    const havePiece = new Set(kept.filter((s) => s.type === "piece").map((s) => s.ref));
+    doc.pieces.forEach((p) => {
+      if (havePiece.has(p.id)) return;
+      const b = boundaryOf[p.id] || [];
+      let lastLead = -1;
+      kept.forEach((s, i) => {
+        if (s.type === "lead" && b.indexOf(s.ref) >= 0) lastLead = i;
+      });
+      const step = { type: "piece", ref: p.id };
+      if (lastLead >= 0) kept.splice(lastLead, 0, step); else kept.push(step);
+    });
+
+    // 补焊点步骤
+    const haveSolder = new Set(kept.filter((s) => s.type === "solder").map((s) => s.ref));
+    const nodeEdges = {};
+    doc.edges.forEach((e) => {
+      (nodeEdges[e.a] = nodeEdges[e.a] || []).push(e.id);
+      (nodeEdges[e.b] = nodeEdges[e.b] || []).push(e.id);
+    });
+    doc.nodes.forEach((n) => {
+      const inc = nodeEdges[n.id] || [];
+      if (inc.length < 2 || haveSolder.has(n.id)) return;
+      let lastLead = -1;
+      kept.forEach((s, i) => {
+        if (s.type === "lead" && inc.indexOf(s.ref) >= 0) lastLead = i;
+      });
+      const step = { type: "solder", ref: n.id };
+      if (lastLead >= 0) kept.splice(lastLead + 1, 0, step); else kept.push(step);
+    });
+
+    seq.steps = kept;
+    return kept;
+  }
+
+  LG.seq = { generate, validate, reconcile, pieceOrder, cornerPoint };
 })(typeof window !== "undefined" ? window : globalThis);

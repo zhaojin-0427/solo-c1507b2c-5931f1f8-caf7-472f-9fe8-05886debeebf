@@ -217,20 +217,18 @@
   }
 
   // ---------- 内凹角（刀轮无法处理） ----------
+  // 用行进方向转向角计算内角，顺/逆时针轮廓均正确
   function reflexVertices(pts, tolDeg) {
-    const area = polyArea(pts);
-    const cw = area > 0; // y 向下
+    const cw = polyArea(pts) > 0; // y 向下
     const out = [];
     const n = pts.length;
     for (let i = 0; i < n; i++) {
       const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
-      const v1 = { x: p0.x - p1.x, y: p0.y - p1.y };
-      const v2 = { x: p2.x - p1.x, y: p2.y - p1.y };
-      const cross = v1.x * v2.y - v1.y * v2.x;
-      const dot = v1.x * v2.x + v1.y * v2.y;
-      const signed = Math.atan2(cross, dot); // 有向转角
-      let interior = cw ? Math.PI + signed : Math.PI - signed;
-      if (interior < 0) interior += 2 * Math.PI;
+      const d1x = p1.x - p0.x, d1y = p1.y - p0.y;
+      const d2x = p2.x - p1.x, d2y = p2.y - p1.y;
+      const turn = Math.atan2(d1x * d2y - d1y * d2x, d1x * d2x + d1y * d2y);
+      let interior = cw ? Math.PI - turn : Math.PI + turn;
+      if (interior <= 0) interior += 2 * Math.PI;
       if (interior > 2 * Math.PI) interior -= 2 * Math.PI;
       const deg = (interior * 180) / Math.PI;
       if (deg > 180 + (tolDeg || 0)) out.push({ index: i, x: p1.x, y: p1.y, deg });
@@ -250,8 +248,9 @@
       const L = Math.hypot(dx, dy);
       if (L < EPS) return { ok: false, poly: [] };
       dx /= L; dy /= L;
-      // 指向内侧：y 向下坐标系，面积>0（视觉顺时针）时内侧在行进方向左手侧
-      const nx = cw ? -dy : dy, ny = cw ? dx : -dy;
+      // 指向内侧：y 向下坐标系，面积>0（视觉顺时针）时内侧在行进方向左手侧 (-dy,dx)，
+      // 逆时针时内侧在右手侧 (dy,-dx)
+      const nx = cw ? -dy : dy, ny = cw ? dx : -dx;
       lines.push({ nx, ny, c: nx * (a.x + nx * d) + ny * (a.y + ny * d) });
     }
     const poly = [];
