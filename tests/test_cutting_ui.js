@@ -39,10 +39,18 @@ function fakeResult() {
     issues: [{ id: "cj0", type: "joint_close", severity: "warn",
       msg: "接头间距 10mm < 60mm", x: 0, y: 200, data: { nodeA: "n2", nodeB: "n3" } }],
     plans: { strategies: [
-      { key: "ffd", name: "首次适配（新料）", newSticks: 1, wasteTotal: 0, reusableTotal: 1383,
+      // 锯路 3mm，用 417（含锯路），余料 1383 可留 → 总废料=3，而非 0
+      { key: "ffd", name: "首次适配（新料）", newSticks: 1, wasteTotal: 3, kerfTotal: 3,
+        reusableTotal: 1383,
         stickCount: 1, allPlaced: true, unplaced: [], recommended: true, consumedRemnants: [],
         sticks: [{ specId: "sp_default", length: 1800, source: "new", sourceId: null,
-          memberIds: ["M1"], used: 417, waste: 0, remnantLength: 1383 }] },
+          memberIds: ["M1"], used: 417, cuts: 1, kerfLoss: 3, waste: 3, remnantLength: 1383 }] },
+      // 余料优先：吃掉库存余料 rm900，采用后该余料必须出库
+      { key: "remnant", name: "余料优先", newSticks: 0, wasteTotal: 3, kerfTotal: 3,
+        reusableTotal: 480, stickCount: 1, allPlaced: true, unplaced: [],
+        recommended: false, consumedRemnants: ["rm900"],
+        sticks: [{ specId: "sp_default", length: 900, source: "remnant", sourceId: "rm900",
+          memberIds: ["M1"], used: 417, cuts: 1, kerfLoss: 3, waste: 3, remnantLength: 480 }] },
     ] },
     specs: { sp_default: { id: "sp_default", name: "6mm 软铅", faceWidth: 6 } },
     summary: { count: 1, totalLength: 414, lockedCount: 0, lockedLength: 0,
@@ -173,6 +181,9 @@ function fakeResult() {
   const plan = doc.cutting.plans[0];
   ok(plan.metrics.newSticks === 1 && plan.sticks[0].remnantLength === 1383,
      "方案记录新料根数/余料: " + JSON.stringify(plan.metrics));
+  ok(plan.metrics.kerfTotal === 3 && plan.metrics.wasteTotal === 3,
+     "方案总废料计入锯路（21mm 情形不为 0）: " + JSON.stringify(plan.metrics));
+  ok(plan.members[0].key === "e1|e2", "方案快照含构件 key（采用时按 key 锁定）");
   ok(plan.members[0].ends[0].ext === 7 && plan.members[0].ends[0].type === "butt",
      "方案快照含端头方向（顶接直切+外伸）");
   ok($("cutPanel").textContent.includes("一致"), "几何未变时历史方案标记一致");
@@ -198,10 +209,29 @@ function fakeResult() {
   // （fake 结果不回传 lock，先清掉手动锁定，验证“采用”本身写入）
   doc.cutting.locks = [];
   window.LG.cutting.adoptPlan(plan);
-  ok(doc.cutting.locks.includes(plan.members[0].key),
-     "采用方案后方案内构件按 key 锁定（已下料）: " + JSON.stringify(doc.cutting.locks));
+  ok(doc.cutting.locks.length === 1 && doc.cutting.locks[0] === "e1|e2",
+     "采用后构件按 key 锁定（不允许 [null]）: " + JSON.stringify(doc.cutting.locks));
   ok(doc.cutting.remnants.some((r) => r.length === 1383 && r.specId === "sp_default"),
      "采用方案后余料 1383mm 入余料池");
+  ok(plan.members[0].locked === true, "方案快照锁定状态与采用结果对齐");
+  // 已锁构件不再参加下一轮排料：重算载荷 locks 保留该 key
+  const callsN = computeCalls.length;
+  await until(() => computeCalls.length > callsN, "采用后触发重算");
+  ok(computeCalls[computeCalls.length - 1].cutting.locks.includes("e1|e2"),
+     "重算载荷保持锁定，已下料构件退出排料");
+
+  // 余料优先方案：用掉的库存余料必须出库，新余段入池
+  const res3 = fakeResult();
+  const remnantStrategy = res3.plans.strategies.find((s) => s.key === "remnant");
+  doc.cutting.remnants = [{ id: "rm900", specId: "sp_default", length: 900 }];
+  doc.cutting.locks = [];
+  const plan2 = await window.LG.cutting.saveStrategy(remnantStrategy, res3, "余料优先方案");
+  window.LG.cutting.adoptPlan(plan2);
+  ok(!doc.cutting.remnants.some((r) => r.id === "rm900"),
+     "采用余料优先方案后，用掉的 rm900 从库存移除（不可重复使用）");
+  ok(doc.cutting.remnants.some((r) => r.length === 480),
+     "消耗余料后剩余的 480mm 余段入池");
+  ok(doc.cutting.locks.includes("e1|e2"), "余料方案构件同样按 key 锁定");
 
   // 清理
   await window.LG.app.api("DELETE", "/api/projects/" + window.LG.state.projectId);

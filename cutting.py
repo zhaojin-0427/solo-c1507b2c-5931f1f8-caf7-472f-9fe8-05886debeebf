@@ -531,13 +531,18 @@ def compute(payload):
                 continue  # 未动用的余料条保持库存
             leftover = st["length"] - st["used"]
             reusable = leftover >= minr - 1e-6
+            cuts = len(st["memberIds"]) - 1
+            kerf_loss = kerf * cuts  # 锯路是实打实的材料损耗
             out.append({
                 "specId": spec_id,
                 "length": st["length"], "source": st["source"],
                 "sourceId": st["sourceId"],
                 "memberIds": st["memberIds"],
                 "used": _r2(st["used"]),
-                "waste": _r2(0 if reusable else leftover),
+                "cuts": cuts,
+                "kerfLoss": _r2(kerf_loss),
+                # 总废料 = 锯路 + 不足最短留余的料头；够长的余段计可复用余料
+                "waste": _r2(kerf_loss + (0.0 if reusable else leftover)),
                 "remnantLength": _r2(leftover) if reusable else None,
             })
         return out, unplaced
@@ -562,6 +567,7 @@ def compute(payload):
         all_unplaced.extend(m["id"] for m in members if m["specId"] is None and not m["locked"])
         new_sticks = sum(1 for s in all_sticks if s["source"] == "new")
         waste_total = sum(s["waste"] for s in all_sticks)
+        kerf_total = sum(s["kerfLoss"] for s in all_sticks)
         reusable_total = sum(s["remnantLength"] or 0 for s in all_sticks)
         consumed = [s["sourceId"] for s in all_sticks
                     if s["source"] == "remnant" and s["sourceId"]]
@@ -569,6 +575,7 @@ def compute(payload):
             "key": key, "name": name,
             "newSticks": new_sticks,
             "wasteTotal": _r2(waste_total),
+            "kerfTotal": _r2(kerf_total),
             "reusableTotal": _r2(reusable_total),
             "consumedRemnants": consumed,
             "stickCount": len(all_sticks),

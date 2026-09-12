@@ -178,11 +178,32 @@ pl = r8["plans"]["strategies"][0]
 ok(pl["allPlaced"] and pl["unplaced"] == [], "推荐方案排下全部未锁定构件")
 ok(all("waste" in s and "remnantLength" in s for s in pl["sticks"]),
    "每根库存条给出废料与可复用余料长度")
-tot = sum(s["waste"] + (s["remnantLength"] or 0) for s in pl["sticks"])
-used_len = sum(m["length"] for m in r8["members"] if not m["locked"])
+# 总废料（含锯路）+ 可复用余料 + 构件用料 = 新料/余料条总投入
+reuse = sum(s["remnantLength"] or 0 for s in pl["sticks"])
 kerfs = sum(C._num(SPEC["kerf"]) * (len(s["memberIds"]) - 1) for s in pl["sticks"])
-ok(abs(tot - (pl["newSticks"] * 1800 - used_len - kerfs)) < 0.5,
-   "废料+余料+锯路+用料 = 新料总长")
+used_len = sum(m["length"] for m in r8["members"] if not m["locked"])
+stock_in = pl["newSticks"] * SPEC["stockLength"]
+ok(abs(pl["wasteTotal"] + reuse + used_len - stock_in) < 0.5,
+   "总废料(含锯路)+余料+用料 = 新料总长（差 %s）" %
+   (pl["wasteTotal"] + reuse + used_len - stock_in))
+ok(abs(pl["kerfTotal"] - kerfs) < 0.5, "方案汇总锯路损耗 %.1fmm" % pl["kerfTotal"])
+
+# 锯路必须计入总废料：两根构件排同一条时即使余段可复用，21mm 锯路也是废料
+p = cross_payload()
+p["cutting"]["remnants"] = [{"id": "big", "specId": "s1", "length": 1800}]
+rk = C.compute(p)
+rp_k = next(x for x in rk["plans"]["strategies"] if x["key"] == "remnant")
+multi = next(s for s in rp_k["sticks"] if len(s["memberIds"]) >= 2)
+ok(multi["kerfLoss"] == SPEC["kerf"] * (len(multi["memberIds"]) - 1),
+   "库存条锯路 = 锯路 × 切割次数（实际 %s）" % multi["kerfLoss"])
+# 余段可复用的条：废料只剩锯路，不再是 0
+reusable_multi = [s for s in rp_k["sticks"]
+                  if len(s["memberIds"]) >= 2 and s["remnantLength"] is not None]
+ok(reusable_multi and all(abs(s["waste"] - s["kerfLoss"]) < 1e-6
+                          for s in reusable_multi),
+   "可留余的多构件条总废料 = 锯路（如 %smm，不为 0）" % reusable_multi[0]["waste"])
+ok(rp_k["wasteTotal"] >= rp_k["kerfTotal"] - 1e-6 and rp_k["kerfTotal"] > 0,
+   "方案总废料 %.1fmm 含锯路 %.1fmm" % (rp_k["wasteTotal"], rp_k["kerfTotal"]))
 
 # 余料优先策略先消耗余料条
 r9 = C.compute(cross_payload(remnants=[
@@ -191,7 +212,10 @@ r9 = C.compute(cross_payload(remnants=[
 rp = next(p for p in r9["plans"]["strategies"] if p["key"] == "remnant")
 ok(any(s["source"] == "remnant" and s["sourceId"] == "rm1" for s in rp["sticks"]),
    "余料优先方案排入库存余料条")
-ok("rm1" in rp["consumedRemnants"], "consumedRemnants 记录已消耗余料")
+ok("rm1" in rp["consumedRemnants"], "consumedRemnants 记录已消耗余料，供采用时出库")
+used_stick = next(s for s in rp["sticks"] if s["sourceId"] == "rm1")
+ok(used_stick["waste"] >= used_stick["kerfLoss"] - 1e-6,
+   "消耗余料条的锯路同样计入废料")
 # 未用的余料不出现
 ok(all(s["memberIds"] for s in rp["sticks"]), "未动用余料条不产生空条记录")
 

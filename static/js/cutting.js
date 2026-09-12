@@ -151,13 +151,14 @@
       metrics: {
         newSticks: strategy.newSticks,
         wasteTotal: strategy.wasteTotal,
+        kerfTotal: strategy.kerfTotal || 0,
         reusableTotal: strategy.reusableTotal,
         stickCount: strategy.stickCount,
       },
       sticks: strategy.sticks,
       consumedRemnants: strategy.consumedRemnants || [],
       members: (res.members || []).map((m) => ({
-        id: m.id, num: m.num, edges: m.edges, length: m.length,
+        id: m.id, num: m.num, key: m.key, edges: m.edges, length: m.length,
         centerLen: m.centerLen, specId: m.specId, specName: (res.specs[m.specId] || {}).name,
         locked: m.locked, ends: m.ends, bends: m.bends, closed: m.closed,
         cx: m.cx, cy: m.cy,
@@ -189,13 +190,32 @@
     LG.cutting.renderPanel();
   }
 
-  // 采用方案 → 未锁定构件全部标记已下料（锁定）；余料按方案结果入余料池
+  // 旧方案快照可能没有 key（修复前保存），由边列表兜底派生
+  function memberKey(m) {
+    return m.key || ((m.edges || []).slice().sort().join("|"));
+  }
+
+  // 采用方案 → 排料条上的构件标记已下料（锁定）；消耗余料出库，新余段入余料池。
+  // sticks 已排除已锁构件，只对条上实际出现的构件加锁。
   function adoptPlan(plan) {
     const c = ensure(d());
-    const lockSet = new Set(c.locks);
-    plan.members.forEach((m) => { if (!m.locked) lockSet.add(m.key); });
+    // 1) 按快照 key 锁定本次下料的构件（清掉历史脏数据 null/undefined）
+    const cutKeys = new Set();
+    const byId = {};
+    (plan.members || []).forEach((m) => { byId[m.id] = m; });
+    (plan.sticks || []).forEach((s) => s.memberIds.forEach((mid) => {
+      const m = byId[mid];
+      const k = m && memberKey(m);
+      if (k) cutKeys.add(k);
+    }));
+    const lockSet = new Set(c.locks.filter((k) => k));
+    cutKeys.forEach((k) => lockSet.add(k));
     c.locks = [...lockSet];
-    plan.sticks.forEach((s, i) => {
+    // 2) 用掉的库存余料出库，避免下轮重复使用
+    const consumed = new Set(plan.consumedRemnants || []);
+    c.remnants = c.remnants.filter((r) => !consumed.has(r.id));
+    // 3) 本次下料留下的余段入池
+    (plan.sticks || []).forEach((s, i) => {
       if (s.remnantLength == null) return;
       c.remnants.push({
         id: "rm_" + plan.id + "_" + i,
@@ -204,6 +224,10 @@
         fromPlan: plan.id,
         note: (s.source === "remnant" ? "余料条余段" : "新料余段"),
       });
+    });
+    // 4) 快照锁定状态与采用结果对齐（历史方案仍可对照）
+    (plan.members || []).forEach((m) => {
+      if (cutKeys.has(m.key)) m.locked = true;
     });
     LG.app.requestSave();
     scheduleCompute();
@@ -421,7 +445,7 @@
       html += strategies.map((p) => `
         <div class="cut-plan${p.recommended ? " rec" : ""}">
           <div class="cut-plan-name">${p.allPlaced ? "" : "⚠ "}${p.name}${p.recommended ? " ★推荐" : ""}</div>
-          <div class="muted">新料 <b>${p.newSticks}</b> 根 · 废料 ${p.wasteTotal.toFixed(0)}mm ·
+          <div class="muted">新料 <b>${p.newSticks}</b> 根 · 总废料 ${p.wasteTotal.toFixed(0)}mm${p.kerfTotal ? `（含锯路 ${p.kerfTotal.toFixed(0)}）` : ""} ·
             可复用余料 ${p.reusableTotal.toFixed(0)}mm${p.allPlaced ? "" : ` · 排不下 ${p.unplaced.length} 根`}</div>
           <button class="mini cut-saveplan" data-key="${p.key}" ${p.allPlaced ? "" : "disabled"}>存为方案</button>
         </div>`).join("");
@@ -658,11 +682,11 @@
           <tbody>${rows}</tbody>
         </table>
         <div class="cd-foot">
-          用 ${g.members.length} 根 · 锯路 ${(sp.kerf || 0)}mm × ${Math.max(0, g.members.length - 1)} ·
-          合计 ${g.stick.used.toFixed(0)}mm ·
+          用 ${g.members.length} 根 · 锯路 ${(sp.kerf || 0)}mm × ${Math.max(0, g.members.length - 1)}
+          ＝ ${(g.stick.kerfLoss || 0).toFixed(0)}mm · 合计 ${g.stick.used.toFixed(0)}mm ·
           ${g.stick.remnantLength != null
             ? `<b class="ok-text">余料 ${g.stick.remnantLength.toFixed(0)}mm（贴余料标签）</b>`
-            : `废料头 ${g.stick.waste.toFixed(0)}mm`}
+            : `废料头 ${(g.stick.waste - (g.stick.kerfLoss || 0)).toFixed(0)}mm（总废料含锯路 ${g.stick.waste.toFixed(0)}mm）`}
         </div>
       </div>`);
     });
@@ -690,7 +714,7 @@
 
     return `<div class="cut-cards-page">
       <div class="cd-title">下料卡 · ${esc(plan.name)}
-        <span class="muted">新料 ${plan.metrics.newSticks} 根 · 废料 ${plan.metrics.wasteTotal.toFixed(0)}mm · 余料 ${plan.metrics.reusableTotal.toFixed(0)}mm</span>
+        <span class="muted">新料 ${plan.metrics.newSticks} 根 · 总废料 ${plan.metrics.wasteTotal.toFixed(0)}mm${plan.metrics.kerfTotal ? `（含锯路 ${plan.metrics.kerfTotal.toFixed(0)}mm）` : ""} · 余料 ${plan.metrics.reusableTotal.toFixed(0)}mm</span>
       </div>
       ${cards.join("")}
       ${labels ? `<div class="cd-title">余料标签（剪下贴于余段）</div><div class="rl-grid">${labels}</div>` : ""}
