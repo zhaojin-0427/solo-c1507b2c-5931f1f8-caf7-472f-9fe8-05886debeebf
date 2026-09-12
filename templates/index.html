@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>铅条分格校样工具 · 彩色玻璃修复</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header id="topbar">
+  <span class="logo">⬡ 铅条分格校样</span>
+  <input id="projName" title="项目名称">
+  <span id="saveStatus" class="muted">…</span>
+  <span class="spacer"></span>
+  <span id="pieceCount" class="muted"></span>
+  <span id="issueBadge" class="badge ok">无问题</span>
+  <button id="btnSave">保存</button>
+  <button id="btnPrint">纸样预览</button>
+  <button id="btnProjects">项目</button>
+</header>
+
+<div id="main">
+  <nav id="toolbar">
+    <button data-tool="select" title="选择/移动 (V)">⭢<span>选择</span></button>
+    <button data-tool="frame" title="画外框 (F)">▣<span>外框</span></button>
+    <button data-tool="bar" title="支撑条 (B)">━<span>支撑条</span></button>
+    <button data-tool="lead" title="铅条中心线 (L)">╱<span>铅条</span></button>
+    <button data-tool="split" title="拆分边 (S)">✂<span>拆分</span></button>
+    <button data-tool="piece" title="片属性 (P)">◧<span>片属性</span></button>
+    <hr>
+    <button id="zoomIn" title="放大">＋</button>
+    <button id="zoomOut" title="缩小">－</button>
+    <button id="zoomFit" title="适应窗口">⛶</button>
+  </nav>
+
+  <div id="canvasWrap">
+    <svg id="canvas"></svg>
+    <div id="toolHint"></div>
+  </div>
+
+  <aside id="sidebar">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="issues">检查</button>
+      <button class="tab-btn" data-tab="piece">片属性</button>
+      <button class="tab-btn" data-tab="lead">下料</button>
+      <button class="tab-btn" data-tab="seq">次序</button>
+      <button class="tab-btn" data-tab="calib">底稿</button>
+      <button class="tab-btn" data-tab="settings">设置</button>
+    </div>
+
+    <div class="tab-page active" id="tab-issues">
+      <div class="pane-note">点击条目定位到图上；交叉缺节点可一键修复。</div>
+      <div id="issueList"></div>
+    </div>
+
+    <div class="tab-page" id="tab-piece">
+      <div id="piecePanel"></div>
+    </div>
+
+    <div class="tab-page" id="tab-lead">
+      <div class="pane-note">点节点编排接头（连续/顶接/斜接），点铅条选中整根连续铅条；拖动节点或改编排后即时重算端切角与用量。</div>
+      <div id="cutPanel"></div>
+    </div>
+
+    <div class="tab-page" id="tab-seq">
+      <div class="seq-controls">
+        <label>起始边角
+          <select id="seqCorner">
+            <option value="tl">左上</option>
+            <option value="tr">右上</option>
+            <option value="br">右下</option>
+            <option value="bl">左下</option>
+          </select>
+        </label>
+        <button id="seqRegen" class="mini">重新生成</button>
+      </div>
+      <div id="seqStatus"></div>
+      <div id="seqViolations"></div>
+      <div id="seqList"></div>
+    </div>
+
+    <div class="tab-page" id="tab-calib">
+      <div id="calibPanel"></div>
+    </div>
+
+    <div class="tab-page" id="tab-settings">
+      <fieldset>
+        <legend>铅条与玻璃（mm）</legend>
+        <label>铅条面宽 <input id="setFaceWidth" type="number" step="0.5" min="3"></label>
+        <label>铅芯宽 <input id="setHeart" type="number" step="0.1" min="0.5"></label>
+        <label>槽深 <input id="setChannel" type="number" step="0.5" min="1"></label>
+        <label>研磨余量 <input id="setGrind" type="number" step="0.1" min="0"></label>
+      </fieldset>
+      <fieldset>
+        <legend>检查阈值</legend>
+        <label>过窄玻璃 &lt; <input id="setMinWidth" type="number" step="1" min="1"> mm</label>
+        <label>净尺寸不足 &lt; <input id="setMinCut" type="number" step="1" min="1"> mm</label>
+      </fieldset>
+      <fieldset>
+        <legend>外框尺寸（mm，按比例缩放）</legend>
+        <label>宽 <input id="frameW" type="number" min="20"></label>
+        <label>高 <input id="frameH" type="number" min="20"></label>
+        <button id="applyFrameSize" class="mini">应用尺寸</button>
+      </fieldset>
+      <fieldset>
+        <legend>纸样分页（mm）</legend>
+        <label>纸宽 <input id="setPageW" type="number" min="50"></label>
+        <label>纸高 <input id="setPageH" type="number" min="50"></label>
+        <label>页边距 <input id="setPageMargin" type="number" min="0"></label>
+        <label>拼接重叠 <input id="setOverlap" type="number" min="0"></label>
+      </fieldset>
+    </div>
+  </aside>
+</div>
+
+<div id="toast"></div>
+
+<div class="modal" id="projModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <b>项目（保存在本机 SQLite）</b>
+      <button id="closeProj" class="mini">关闭</button>
+    </div>
+    <div class="modal-actions">
+      <button id="btnNew">新建项目</button>
+      <button id="btnSample">载入示例面板</button>
+    </div>
+    <div id="projList"></div>
+  </div>
+</div>
+
+<div id="printOverlay">
+  <div class="print-head">
+    <b>纸样预览（实际尺寸分页）</b>
+    <span id="printInfo" class="muted"></span>
+    <label class="print-opt" id="printUnderlayWrap"><input type="checkbox" id="printUnderlay"> 淡印当前底稿</label>
+    <label class="print-opt" id="printCardsWrap" style="display:none"><input type="checkbox" id="printCards"> 附下料卡/余料标签</label>
+    <span class="spacer"></span>
+    <button id="doPrint">打印</button>
+    <button id="closePrint">返回编辑</button>
+  </div>
+  <div id="printPages"></div>
+</div>
+
+<!-- 现场底稿校准工作区 -->
+<div id="calibModal">
+  <div class="calib-box">
+    <div class="calib-head">
+      <b>底稿校准</b>
+      <input id="calVerName" title="方案名称">
+      <select id="calMethod" title="校正方法">
+        <option value="affine">仿射校正（≥3 点）</option>
+        <option value="perspective">透视校正（≥4 点）</option>
+      </select>
+      <span id="calBadge" class="badge ok">草稿</span>
+      <span id="calRms" class="muted"></span>
+      <span class="spacer"></span>
+      <button id="calCompute">计算校正</button>
+      <button id="calFreeze">冻结参数</button>
+      <button id="calCopy" style="display:none">复制为新版本</button>
+      <button id="calClose">关闭</button>
+    </div>
+    <div class="calib-body">
+      <div class="calib-view">
+        <div class="calib-vtitle">
+          <span>原图 · 点击标记控制点，拖动微调</span>
+          <button id="calFitL" class="mini">⛶</button>
+        </div>
+        <div class="calib-vp" id="calVpL">
+          <div class="calib-vp-inner" id="calInnerL">
+            <img id="calImg" draggable="false" alt="原图">
+            <svg id="calSvgL"></svg>
+          </div>
+        </div>
+      </div>
+      <div class="calib-view">
+        <div class="calib-vtitle">
+          <span id="calRightTitle">校正结果（面板 mm）· 点击为选中点填坐标</span>
+          <span>
+            <button id="calFlip" class="mini">看校正前</button>
+            <button id="calFitR" class="mini">⛶</button>
+          </span>
+        </div>
+        <div class="calib-vp" id="calVpR">
+          <svg id="calSvgR"><g id="calRg"></g></svg>
+          <div class="calib-vp-inner" id="calInnerR2" style="display:none">
+            <img id="calImgR" draggable="false" alt="原图">
+            <svg id="calSvgR2"></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="calib-foot">
+      <table class="calib-table">
+        <thead><tr>
+          <th>#</th><th>图像 u (px)</th><th>图像 v (px)</th>
+          <th>面板 X (mm)</th><th>面板 Y (mm)</th>
+          <th>残差方向</th><th>像素误差</th><th>毫米误差</th>
+          <th>锁定</th><th>排除</th><th></th>
+        </tr></thead>
+        <tbody id="calTbody"></tbody>
+      </table>
+      <div class="calib-hint" id="calHint"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/geometry.js"></script>
+<script src="/static/js/calibration.js"></script>
+<script src="/static/js/checks.js"></script>
+<script src="/static/js/sequence.js"></script>
+<script src="/static/js/cutting.js"></script>
+<script src="/static/js/print.js"></script>
+<script src="/static/js/editor.js"></script>
+<script src="/static/js/calibui.js"></script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>
