@@ -42,6 +42,7 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="issues">检查</button>
       <button class="tab-btn" data-tab="piece">片属性</button>
+      <button class="tab-btn" data-tab="lead">下料</button>
       <button class="tab-btn" data-tab="seq">次序</button>
       <button class="tab-btn" data-tab="calib">底稿</button>
       <button class="tab-btn" data-tab="settings">设置</button>
@@ -54,6 +55,11 @@
 
     <div class="tab-page" id="tab-piece">
       <div id="piecePanel"></div>
+    </div>
+
+    <div class="tab-page" id="tab-lead">
+      <div class="pane-note">点节点编排接头（连续/顶接/斜接），点铅条选中整根连续铅条；拖动节点或改编排后即时重算端切角与用量。</div>
+      <div id="cutPanel"></div>
     </div>
 
     <div class="tab-page" id="tab-seq">
@@ -128,6 +134,7 @@
     <b>纸样预览（实际尺寸分页）</b>
     <span id="printInfo" class="muted"></span>
     <label class="print-opt" id="printUnderlayWrap"><input type="checkbox" id="printUnderlay"> 淡印当前底稿</label>
+    <label class="print-opt" id="printCardsWrap" style="display:none"><input type="checkbox" id="printCards"> 附下料卡/余料标签</label>
     <span class="spacer"></span>
     <button id="doPrint">打印</button>
     <button id="closePrint">返回编辑</button>
@@ -202,6 +209,7 @@
 <script src="/static/js/calibration.js"></script>
 <script src="/static/js/checks.js"></script>
 <script src="/static/js/sequence.js"></script>
+<script src="/static/js/cutting.js"></script>
 <script src="/static/js/print.js"></script>
 <script src="/static/js/editor.js"></script>
 <script src="/static/js/calibui.js"></script>

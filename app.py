@@ -9,6 +9,8 @@ import time
 
 from flask import Flask, g, jsonify, render_template, request
 
+import cutting
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "leadlight.db")
 
@@ -298,6 +300,27 @@ def delete_calib(vid):
     db.execute("DELETE FROM calib_versions WHERE id=?", (vid,))
     db.commit()
     return jsonify({"ok": True})
+
+
+# ---------- 铅条下料与接头编排（计算在服务端，规格/方案随项目 doc 存 SQLite） ----------
+@app.post("/api/cutting/compute")
+def cutting_compute():
+    data = request.get_json(force=True, silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list) \
+            or not isinstance(data.get("edges", []), list):
+        return jsonify({"error": "payload must be an object with nodes[]/edges[]"}), 400
+    cutting_obj = data.get("cutting")
+    if cutting_obj is not None and (
+        not isinstance(cutting_obj, dict)
+        or not isinstance(cutting_obj.get("specs", []), list)
+    ):
+        return jsonify({"error": "cutting must be an object with specs[]"}), 400
+    try:
+        return jsonify(cutting.compute(data))
+    except Exception as ex:  # 坏载荷不应打挂服务
+        return jsonify({"error": "compute failed", "detail": str(ex)}), 400
 
 
 if __name__ == "__main__":

@@ -25,6 +25,8 @@
       sequence: { startCorner: "tl", steps: [], custom: false },
       // 现场底稿：当前叠放的校准版本与显示状态（几何不受影响）
       underlay: { versionId: null, visible: true, opacity: 0.55, crop: null, printFaint: false },
+      // 铅条下料与接头编排（规格/编排/锁定/余料/历史方案随项目入库；计算在服务端）
+      cutting: LG.cutting ? LG.cutting.defaultCutting() : null,
     };
   }
 
@@ -77,10 +79,34 @@
     });
     // 按质心排序显示（编号本身保留）
     st().facePieces = matched;
-    st().issues = LG.checks.run(d, matched);
+    const geomIssues = LG.checks.run(d, matched);
+    st().issues = mergeIssues(geomIssues, cuttingIssues());
     renderSidePanels();
     LG.editor.render();
+    LG.cutting.scheduleCompute();
     scheduleSave();
+  }
+
+  // 下料问题（服务端计算）与几何检查合并；结果未到时先只显示几何问题
+  function cuttingIssues() {
+    const res = LG.cutting ? LG.cutting.result() : null;
+    if (!res || !st().projectId) return [];
+    return res.issues.map((i) => ({ ...i }));
+  }
+
+  // 服务端异步返回后刷新问题列表/徽标，不触发几何重算
+  function refreshIssues() {
+    st().issues = mergeIssues(
+      LG.checks.run(doc(), st().facePieces),
+      cuttingIssues()
+    );
+    renderIssues();
+    updateCounts();
+  }
+
+  function mergeIssues(a, b) {
+    // id 前缀不同（i* / cj*），直接拼接
+    return (a || []).concat(b || []);
   }
 
   function onGeomChanged() {
@@ -156,6 +182,7 @@
     renderIssues();
     renderPiecePanel();
     renderSeqPanel();
+    if (LG.cutting) LG.cutting.renderPanel();
     if (LG.calibui) LG.calibui.renderPanel();
     updateCounts();
   }
@@ -171,6 +198,9 @@
   const ISSUE_TYPE_NAME = {
     dangling: "悬空端点", crossing: "交叉缺节点", narrow: "过窄玻璃",
     reflex: "内凹角", undersize: "净尺寸不足",
+    joint_close: "接头过近", overlength: "铅条超长", spec_mismatch: "规格不一致",
+    miter_unpaired: "斜接落单", miter_sharp: "斜接过锐", no_through: "无连续路",
+    spec_missing: "缺规格", closed_loop: "闭合环",
   };
 
   function renderIssues() {
@@ -264,9 +294,11 @@
 
   function onSelectionChanged() {
     renderPiecePanel();
+    if (LG.cutting) LG.cutting.renderPanel();
     LG.editor.render();
     const sel = st().selection;
     if (sel && sel.kind === "piece") showTab("piece");
+    if (sel && (sel.kind === "member" || sel.kind === "node")) showTab("lead");
   }
 
   // ---------- 次序 ----------
@@ -293,7 +325,11 @@
       if (!e) return "放铅（已失效）";
       const a = d.nodes.find((n) => n.id === e.a), b = d.nodes.find((n) => n.id === e.b);
       const len = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
-      return `放铅条 ${e.kind === "frame" ? "（外框边）" : ""} ${len.toFixed(0)}mm`;
+      const res = LG.cutting ? LG.cutting.result() : null;
+      const mid = res && res.memberOfEdge ? res.memberOfEdge[e.id] : null;
+      const m = mid && res.members.find((x) => x.id === mid);
+      const tag = m ? `#${m.num}（下料 ${m.length.toFixed(0)}mm${m.locked ? "·已锁" : ""}）` : "";
+      return `放铅条 ${e.kind === "frame" ? "（外框边）" : ""} ${len.toFixed(0)}mm ${tag}`;
     }
     if (s.type === "piece") {
       const p = d.pieces.find((x) => x.id === s.ref);
@@ -472,9 +508,16 @@
     st().projectId = p.id;
     st().projectName = p.name;
     st().doc = p.doc || defaultDoc();
-    st().doc.settings = Object.assign(defaultDoc().settings, st().doc.settings || {});
+    const df = defaultDoc();
+    st().doc.settings = Object.assign(df.settings, st().doc.settings || {});
+    ["nodes", "edges", "pieces", "bars"].forEach((k) => {
+      if (!Array.isArray(st().doc[k])) st().doc[k] = [];
+    });
+    if (!st().doc.frame) st().doc.frame = null;
     st().doc.sequence = st().doc.sequence || { startCorner: "tl", steps: [], custom: false };
-    st().doc.underlay = Object.assign(defaultDoc().underlay, st().doc.underlay || {});
+    st().doc.underlay = Object.assign(df.underlay, st().doc.underlay || {});
+    st().doc.cutting = LG.cutting.ensure(st().doc);
+    st().cutState = null;
     st().selection = null;
     st().underlayBmp = null;
     $("projName").value = p.name;
@@ -534,6 +577,11 @@
     const canU = u.versionId != null && st().underlayBmp;
     $("printUnderlayWrap").style.display = canU ? "" : "none";
     $("printUnderlay").checked = !!(canU && u.printFaint);
+    // 下料卡：有选定（对照中）的历史方案时可附
+    const c = LG.cutting.ensure(d);
+    const cardPlan = c.plans.find((p) => p.id === c.selectedPlanId);
+    $("printCardsWrap").style.display = cardPlan ? "" : "none";
+    $("printCards").checked = !!cardPlan;
     const renderPages = () => {
       const showU = canU && $("printUnderlay").checked;
       const underlay = showU
@@ -550,12 +598,19 @@
         div.innerHTML = LG.print.renderPageSVG(d, st().facePieces, pg, layout, underlay);
         box.appendChild(div);
       });
+      if ($("printCards").checked && cardPlan) {
+        const cards = document.createElement("div");
+        cards.className = "print-cards";
+        cards.innerHTML = LG.cutting.renderCutCardsSVG(cardPlan);
+        box.appendChild(cards);
+      }
     };
     $("printUnderlay").onchange = (ev) => {
       doc().underlay.printFaint = ev.target.checked;
       scheduleSave();
       renderPages();
     };
+    $("printCards").onchange = renderPages;
     renderPages();
     // 动态 @page
     let stEl = $("printPageStyle");
@@ -629,7 +684,8 @@
   LG.app = {
     onGeomChanged, onSelectionChanged, toast, setTool, selectIssue,
     fitView: () => LG.editor.fitView(),
-    api, requestSave: scheduleSave,
+    api, requestSave: scheduleSave, refreshIssues,
+    loadProject, newProject,
   };
 
   document.addEventListener("DOMContentLoaded", boot);

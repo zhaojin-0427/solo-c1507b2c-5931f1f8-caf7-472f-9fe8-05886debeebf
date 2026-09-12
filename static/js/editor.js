@@ -297,7 +297,13 @@
       hit.addEventListener("pointerdown", (ev) => {
         if (st().tool === "select") {
           ev.stopPropagation();
-          st().selection = { kind: "edge", id: e.id };
+          // 有下料结果时，点边选中整根连续铅条（再点同一构件则选边本身，便于边级规格）
+          const cres = LG.cutting ? LG.cutting.result() : null;
+          const mid = cres && cres.memberOfEdge[e.id];
+          const m = mid && cres.members.find((x) => x.id === mid);
+          const selM = st().selection && st().selection.kind === "member" && st().selection.id === mid;
+          if (m && !selM) st().selection = { kind: "member", id: m.id };
+          else st().selection = { kind: "edge", id: e.id };
           LG.app.onSelectionChanged();
         } else if (st().tool === "split") {
           ev.stopPropagation();
@@ -314,11 +320,43 @@
       });
       const cls = e.kind === "frame" ? "edge-frame" : "edge-lead";
       const isSel = sel && sel.kind === "edge" && sel.id === e.id;
-      // 面宽带（按实际面宽）
-      el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "edge-band " + cls + (isSel ? " sel" : ""), "stroke-width": faceW }, g);
+      // 下料：连续铅条同色；选中构件整根高亮
+      const cut = LG.cutting ? LG.cutting.edgeColor(e.id) : null;
+      const memberSel = cut && sel && sel.kind === "member" && sel.id === cut.member.id;
+      if (cut) {
+        el("line", {
+          x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+          class: "edge-band cut-band" + (memberSel ? " sel" : "") + (cut.member.locked ? " locked" : ""),
+          "stroke-width": faceW, stroke: LG.cutting.memberColor(cut.member),
+        }, g);
+      } else {
+        // 面宽带（按实际面宽）
+        el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "edge-band " + cls + (isSel ? " sel" : ""), "stroke-width": faceW }, g);
+      }
       // 中心线
-      el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "edge-core " + cls + (isSel ? " sel" : "") }, g);
+      el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        class: "edge-core " + cls + (isSel || memberSel ? " sel" : "") }, g);
     });
+
+    // 连续铅条编号（构件质心）
+    const cres = LG.cutting ? LG.cutting.result() : null;
+    if (cres) {
+      const sm = sel && sel.kind === "member";
+      cres.members.forEach((m) => {
+        const g2 = el("g", { class: "cut-label" + (sm && sel.id === m.id ? " sel" : "") }, g);
+        const hit = el("circle", { cx: m.cx, cy: m.cy, r: 9 / v.s, class: "cut-label-hit" }, g2);
+        el("circle", { cx: m.cx, cy: m.cy, r: 6.5 / v.s,
+          class: "cut-label-dot" + (m.locked ? " locked" : ""), fill: LG.cutting.memberColor(m) }, g2);
+        const t = el("text", { x: m.cx, y: m.cy, class: "cut-label-t", "font-size": 8 / v.s }, g2);
+        t.textContent = m.num;
+        hit.addEventListener("pointerdown", (ev) => {
+          if (st().tool !== "select") return;
+          ev.stopPropagation();
+          st().selection = { kind: "member", id: m.id };
+          LG.app.onSelectionChanged();
+        });
+      });
+    }
   }
 
   function renderNodes() {
@@ -343,6 +381,20 @@
         drag = { nodeId: n.id, moved: false };
         svg.setPointerCapture(ev.pointerId);
       });
+      // 下料接头编排小标：┬顶接 / ◇斜接 / ─连续 / ×悬空
+      const gj = LG.cutting ? LG.cutting.nodeGlyph(n.id) : null;
+      if (gj) {
+        const j = gj.joint;
+        let txt = "", cls2 = "jg";
+        if (deg[n.id] === 1) { txt = "×"; cls2 += " jg-end"; }
+        else if (j.through.length) txt = j.butt.length ? "┬" : "─";
+        else txt = "◇";
+        if (isSel) cls2 += " sel";
+        const t2 = el("text", {
+          x: n.x + 7 / v.s, y: n.y - 6 / v.s, class: cls2, "font-size": 9 / v.s,
+        }, g);
+        t2.textContent = txt;
+      }
     });
   }
 
@@ -387,8 +439,19 @@
       if (h.type === "lead") {
         const e = doc().edges.find((z) => z.id === h.ref);
         if (!e) return;
-        const na = doc().nodes.find((n) => n.id === e.a), nb = doc().nodes.find((n) => n.id === e.b);
-        if (na && nb) el("line", { x1: na.x, y1: na.y, x2: nb.x, y2: nb.y, class: "step-hl" }, g);
+        // 下料：整根连续铅条一起高亮
+        const cres = LG.cutting ? LG.cutting.result() : null;
+        const mid = cres && cres.memberOfEdge[h.ref];
+        const m = mid && cres.members.find((x) => x.id === mid);
+        const eids = m ? m.edges : [h.ref];
+        const nb = {};
+        doc().nodes.forEach((n) => (nb[n.id] = n));
+        eids.forEach((eid) => {
+          const ee = doc().edges.find((z) => z.id === eid);
+          const na = ee && nb[ee.a], nb2 = ee && nb[ee.b];
+          if (na && nb2)
+            el("line", { x1: na.x, y1: na.y, x2: nb2.x, y2: nb2.y, class: "step-hl" }, g);
+        });
       } else if (h.type === "piece") {
         const fp = (st().facePieces || []).find((x) => x.piece && x.piece.id === h.ref);
         if (fp) el("polygon", { points: fp.face.pts.map((p) => `${p.x},${p.y}`).join(" "), class: "step-hl-poly" }, g);
