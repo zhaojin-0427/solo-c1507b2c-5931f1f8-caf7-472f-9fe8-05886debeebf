@@ -47,8 +47,11 @@
     return maxPerp < dMax * 1e-6; // 共线
   }
 
+  // 严格数值判断：isFinite(null)===true（null→0），未填坐标必须显式排除
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+
   function finitePt(p) {
-    return isFinite(p.imgX) && isFinite(p.imgY) && isFinite(p.panelX) && isFinite(p.panelY);
+    return isNum(p.imgX) && isNum(p.imgY) && isNum(p.panelX) && isNum(p.panelY);
   }
   function included(pts) {
     return (pts || []).filter((p) => !p.excluded && finitePt(p));
@@ -223,12 +226,18 @@
   function compute(pts, method) {
     method = method === "perspective" ? "perspective" : "affine";
     const need = method === "perspective" ? 4 : 3;
-    const inc = included(pts);
-    if (inc.length < need)
+    const mName = method === "perspective" ? "透视" : "仿射";
+    // 未填写完整的点不参与拟合；有效点不足时阻止并提示补全
+    const active = (pts || []).filter((p) => !p.excluded);
+    const inc = active.filter(finitePt);
+    if (inc.length < need) {
+      const incomplete = active.length - inc.length;
       throw new Error(
-        (method === "perspective" ? "透视" : "仿射") +
-          `校正至少需要 ${need} 组控制点（当前 ${inc.length} 组有效）`
+        `${mName}校正至少需要 ${need} 组控制点（当前 ${inc.length} 组有效` +
+          (incomplete ? `，${incomplete} 个点未填完整坐标，请补全` : "") +
+          "）"
       );
+    }
     if (degenerate(inc.map((p) => [p.imgX, p.imgY])))
       throw new Error("图像控制点共线或重合，点集退化，拒绝计算");
     if (degenerate(inc.map((p) => [p.panelX, p.panelY])))
@@ -306,6 +315,6 @@
 
   LG.calib = {
     solveAffine, solvePerspective, compute, apply, invert,
-    residuals, rms, hashPoints, included, degenerate, rectify,
+    residuals, rms, hashPoints, included, degenerate, rectify, isNum,
   };
 })(typeof window !== "undefined" ? window : globalThis);

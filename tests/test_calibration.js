@@ -160,5 +160,36 @@ section("点集指纹：参数过期判定");
   ok(C.hashPoints(pts, "perspective") !== p.ptsHash, "切换方法指纹变化");
 }
 
+section("未填完整的点：排除拟合，不足时阻止");
+{
+  // P4 面板坐标留空（null）：不得当作 0 混入拟合
+  const f = (u, v) => [0.5 * u + 100, 0.5 * v + 200];
+  const mk = (u, v) => { const [X, Y] = f(u, v); return pt(u, v, X, Y); };
+  const pts = [mk(0, 0), mk(1000, 0), mk(0, 800)];
+  const incomplete = pt(500, 400, null, null); // 只标了图像点，未填面板坐标
+  const withNull = pts.concat([incomplete]);
+  const p1 = C.compute(withNull, "affine");
+  ok(p1.nPts === 3, `空坐标点不参与拟合（nPts=${p1.nPts}）`);
+  const p2 = C.compute(pts, "affine");
+  ok(JSON.stringify(p1.m) === JSON.stringify(p2.m), "含空点与不含空点拟合结果完全一致");
+  ok(p1.rmsMm < 1e-6, "空坐标点未污染 RMS");
+  // 残差不覆盖未填完整的点
+  const res = C.residuals(withNull, p1);
+  ok(res.length === 3 && !res.some((r) => r.id === incomplete.id), "残差列表不含未填完整的点");
+  // 指纹也不受空点影响
+  ok(C.hashPoints(withNull, "affine") === C.hashPoints(pts, "affine"), "空坐标点不影响点集指纹");
+  // 有效点不足：阻止并提示补全
+  let err = null;
+  try { C.compute([mk(0, 0), mk(100, 0), pt(50, 50, null, null), pt(60, 60, null, null)], "affine"); }
+  catch (e) { err = e; }
+  ok(err && /至少需要 3 组/.test(err.message) && /未填完整坐标/.test(err.message),
+    "有效点不足时阻止拟合并提示补全：" + (err && err.message));
+  // 透视同样：3 有效 + 1 空 → 阻止
+  err = null;
+  try { C.compute([mk(0, 0), mk(100, 0), mk(0, 100), pt(50, 50, null, null)], "perspective"); }
+  catch (e) { err = e; }
+  ok(err && /至少需要 4 组/.test(err.message), "透视 3 有效 + 1 空 → 阻止");
+}
+
 console.log(`\n结果：${passed} 通过，${failed} 失败`);
 process.exit(failed ? 1 : 0);

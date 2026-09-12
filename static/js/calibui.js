@@ -10,6 +10,8 @@
   const api = (m, u, b) => LG.app.api(m, u, b);
   const toast = (m) => LG.app.toast(m);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // 严格数值判断：null/空串不算有效坐标（isFinite(null)===true 的坑）
+  const isNum = (v) => LG.calib.isNum(v);
 
   function el(tag, attrs, parent) {
     const e = document.createElementNS(NS, tag);
@@ -128,6 +130,13 @@
     renderPanel();
   }
 
+  // RMS 文本（params 可能来自旧数据或副本，统计字段缺失时不崩溃）
+  function fmtRms(params) {
+    if (!params) return "未计算";
+    if (params.rmsMm == null || params.rmsPx == null) return "已计算（无统计）";
+    return `RMS ${params.rmsMm.toFixed(2)} mm / ${params.rmsPx.toFixed(1)} px · ${params.nPts || "?"} 点`;
+  }
+
   // ---------- 侧栏面板 ----------
   function renderPanel() {
     const box = $("calibPanel");
@@ -165,9 +174,7 @@
     if (!C.versions.length) html += `<div class="empty">暂无校准方案</div>`;
     C.versions.forEach((v) => {
       const stale = v.params && LG.calib.hashPoints(v.points, v.method) !== v.params.ptsHash;
-      const rms = v.params
-        ? `RMS ${v.params.rmsMm.toFixed(2)}mm / ${v.params.rmsPx.toFixed(1)}px · ${v.params.nPts}点`
-        : "未计算";
+      const rms = fmtRms(v.params);
       const badge = v.frozen ? `<span class="cal-badge frozen">已冻结</span>`
         : stale ? `<span class="cal-badge stale">参数过期</span>` : `<span class="cal-badge">草稿</span>`;
       html += `<div class="cal-ver ${v.id === u.versionId ? "current" : ""}">
@@ -252,8 +259,8 @@
 
   async function copyVersion(vid) {
     const v = C.versions.find((x) => x.id === vid);
-    if (!v) return;
-    await api("POST", `/api/projects/${st().projectId}/calib`, {
+    if (!v) return null;
+    const r = await api("POST", `/api/projects/${st().projectId}/calib`, {
       photo_id: v.photo_id,
       name: (v.name + " 副本").slice(0, 80),
       method: v.method,
@@ -263,6 +270,7 @@
     C.versions = await api("GET", `/api/projects/${st().projectId}/calib`);
     renderPanel();
     toast("已复制方案；调整点集后重新计算，可比较均方根误差");
+    return r.id;
   }
 
   async function deleteVersion(vid) {
@@ -278,9 +286,11 @@
     refreshUnderlay();
   }
 
-  function saveVersion(immediate) {
+  function saveVersion(immediate, allowFrozen) {
     const v = C.editing;
-    if (!v) return;
+    if (!v) return Promise.resolve();
+    // 冻结版本只读：除冻结动作本身外不再回写（服务端同样拒绝）
+    if (v.frozen && !allowFrozen) return Promise.resolve();
     const body = { name: v.name, method: v.method, points: v.points, params: v.params, frozen: v.frozen };
     clearTimeout(C.saveTimer);
     const doSave = () =>
@@ -327,18 +337,19 @@
     const v = C.editing;
     if (!v) return;
     $("calVerName").value = v.name;
+    $("calVerName").disabled = v.frozen;
     $("calMethod").value = v.method;
     $("calMethod").disabled = v.frozen;
     $("calCompute").disabled = v.frozen;
-    $("calFreeze").textContent = v.frozen ? "解冻（另建版本调整）" : "冻结参数";
+    // 冻结版本始终只读：后续调整只能复制或新建版本
+    $("calFreeze").style.display = v.frozen ? "none" : "";
+    $("calCopy").style.display = v.frozen ? "" : "none";
     const badge = $("calBadge");
     if (v.frozen) { badge.textContent = "已冻结"; badge.className = "badge ok"; }
     else if (isStale(v)) { badge.textContent = "草稿 · 参数过期"; badge.className = "badge warn"; }
     else if (v.params) { badge.textContent = "草稿 · 已计算"; badge.className = "badge ok"; }
     else { badge.textContent = "草稿"; badge.className = "badge warn"; }
-    $("calRms").textContent = v.params
-      ? `RMS ${v.params.rmsMm.toFixed(2)} mm / ${v.params.rmsPx.toFixed(1)} px · ${v.params.nPts} 点`
-      : "未计算";
+    $("calRms").textContent = fmtRms(v.params);
     $("calRightTitle").textContent = C.flip
       ? "校正前（原图）"
       : "校正结果（面板 mm）· 点击为选中点填坐标";
@@ -355,7 +366,7 @@
     const inc = LG.calib.included(v.points);
     const need = v.method === "perspective" ? 4 : 3;
     const incomplete = v.points.filter((p) =>
-      !p.excluded && !(isFinite(p.panelX) && isFinite(p.panelY))).length;
+      !p.excluded && !(isNum(p.panelX) && isNum(p.panelY))).length;
     let t = `${v.method === "perspective" ? "透视" : "仿射"}校正至少 ${need} 组非共线点；当前 ${inc.length} 组有效`;
     if (incomplete) t += `，${incomplete} 个点未填面板坐标`;
     t += "。锁定 = 可信点不可改；排除 = 暂不参与拟合。校准只改变底稿，不移动已有节点和铅条。";
@@ -389,7 +400,7 @@
     if (C.rectBmp) { eat(C.rectBmp.bbox.x0, C.rectBmp.bbox.y0); eat(C.rectBmp.bbox.x1, C.rectBmp.bbox.y1); }
     const f = doc().frame;
     if (f) { eat(f.x, f.y); eat(f.x + f.w, f.y + f.h); }
-    C.editing.points.forEach((p) => { if (isFinite(p.panelX) && isFinite(p.panelY)) eat(p.panelX, p.panelY); });
+    C.editing.points.forEach((p) => { if (isNum(p.panelX) && isNum(p.panelY)) eat(p.panelX, p.panelY); });
     if (x0 === Infinity) return { x0: 0, y0: 0, x1: 600, y1: 400 };
     return { x0, y0, x1, y1 };
   }
@@ -562,7 +573,7 @@
     // 控制点：残差箭头（拟合→目标）+ 目标十字
     const res = residualsOf();
     v.points.forEach((p, i) => {
-      if (!isFinite(p.panelX) || !isFinite(p.panelY)) return;
+      if (!isNum(p.panelX) || !isNum(p.panelY)) return;
       const r = res[p.id];
       if (r && !p.excluded)
         drawArrow(g, r.predX, r.predY, p.panelX, p.panelY, errColor(r.mmErr), 2.5 / s, 9 / s);
@@ -600,21 +611,27 @@
     const res = residualsOf();
     v.points.forEach((p, i) => {
       const r = res[p.id];
-      const complete = isFinite(p.panelX) && isFinite(p.panelY);
+      const complete = isNum(p.panelX) && isNum(p.panelY);
       const tr = document.createElement("tr");
       tr.className =
         (p.id === C.activePt ? "active " : "") +
         (p.excluded ? "excluded " : "") +
         (!complete && !p.excluded ? "incomplete" : "");
       const ro = v.frozen || p.locked;
-      const numInp = (val, cb) => {
+      // nullable=true 的列（面板坐标）允许清空 → 置为未填写
+      const numInp = (val, cb, nullable) => {
         const inp = document.createElement("input");
         inp.type = "number"; inp.step = "0.5";
-        inp.value = isFinite(val) ? Math.round(val * 100) / 100 : "";
+        inp.value = isNum(val) ? Math.round(val * 100) / 100 : "";
         inp.disabled = ro;
         inp.addEventListener("change", () => {
+          if (inp.value.trim() === "") {
+            if (nullable) { cb(null); pointMutated(); }
+            else inp.value = isNum(val) ? val : "";
+            return;
+          }
           const n = parseFloat(inp.value);
-          if (!isFinite(n)) { inp.value = isFinite(val) ? val : ""; return; }
+          if (!isFinite(n)) { inp.value = isNum(val) ? val : ""; return; }
           cb(n);
           pointMutated();
         });
@@ -626,8 +643,8 @@
         td(document.createTextNode("P" + (i + 1) + (p.locked ? " 🔒" : ""))),
         td(numInp(p.imgX, (n) => { p.imgX = n; })),
         td(numInp(p.imgY, (n) => { p.imgY = n; })),
-        td(numInp(p.panelX, (n) => { p.panelX = n; })),
-        td(numInp(p.panelY, (n) => { p.panelY = n; })),
+        td(numInp(p.panelX, (n) => { p.panelX = n; }, true)),
+        td(numInp(p.panelY, (n) => { p.panelY = n; }, true)),
         td(document.createTextNode(r && !p.excluded ? `${arrowChar(r.angDeg)} ${r.angDeg.toFixed(0)}°` : "—")),
         td(document.createTextNode(r && !p.excluded ? r.pxErr.toFixed(2) + " px" : "—")),
         td(document.createTextNode(r && !p.excluded ? r.mmErr.toFixed(2) + " mm" : "—"))
@@ -688,20 +705,19 @@
     toast(`校正完成：RMS ${v.params.rmsMm.toFixed(2)} mm / ${v.params.rmsPx.toFixed(1)} px（${v.params.nPts} 点）`);
   }
 
-  function freezeToggle() {
+  async function freezeNow() {
     const v = C.editing;
-    if (!v) return;
-    if (v.frozen) {
-      if (!confirm("解冻后可修改点集；建议改为「复制」方案另建版本调整。仍要解冻？")) return;
-      v.frozen = false;
-      saveVersion(true).then(renderPanel);
-      renderWorkspace();
-      return;
-    }
+    if (!v || v.frozen) return;
     if (!v.params) return toast("请先计算校正");
     if (isStale(v)) return toast("点集已修改，请重新计算校正后再冻结");
     v.frozen = true;
-    saveVersion(true);
+    // 等服务端确认冻结后再开放后续操作，避免并发请求越过只读检查
+    try {
+      await saveVersion(true, true);
+    } catch (e) {
+      v.frozen = false;
+      return toast("冻结保存失败：" + e.message);
+    }
     // 冻结即选定：设为当前画布底稿（只改底稿，不动节点与铅条）
     doc().underlay.versionId = v.id;
     doc().underlay.visible = true;
@@ -761,7 +777,7 @@
     active.panelX = Math.round(p.x * 10) / 10;
     active.panelY = Math.round(p.y * 10) / 10;
     // 自动前进到下一个未填坐标的点
-    const next = v.points.find((x) => !x.excluded && !(isFinite(x.panelX) && isFinite(x.panelY)));
+    const next = v.points.find((x) => !x.excluded && !(isNum(x.panelX) && isNum(x.panelY)));
     C.activePt = next ? next.id : active.id;
     pointMutated();
   }
@@ -811,7 +827,13 @@
   function init() {
     $("calClose").addEventListener("click", closeWorkspace);
     $("calCompute").addEventListener("click", computeNow);
-    $("calFreeze").addEventListener("click", freezeToggle);
+    $("calFreeze").addEventListener("click", freezeNow);
+    // 冻结版本的唯一出路：复制为新版本再调整
+    $("calCopy").addEventListener("click", async () => {
+      if (!C.editing) return;
+      const nid = await copyVersion(C.editing.id);
+      if (nid) openWorkspace(nid);
+    });
     $("calFitL").addEventListener("click", () => { fitViewL(); renderActiveViews(); });
     $("calFitR").addEventListener("click", () => {
       if (C.flip) fitViewL(); else fitViewR();
@@ -819,7 +841,7 @@
     });
     $("calFlip").addEventListener("click", () => { C.flip = !C.flip; renderWorkspace(); });
     $("calVerName").addEventListener("change", () => {
-      if (!C.editing) return;
+      if (!C.editing || C.editing.frozen) return;
       C.editing.name = $("calVerName").value.trim().slice(0, 80) || C.editing.name;
       saveVersion(true).then(renderPanel);
     });

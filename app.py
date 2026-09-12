@@ -255,8 +255,13 @@ def create_calib(pid):
 def update_calib(vid):
     data = request.get_json(force=True) or {}
     db = get_db()
-    if not db.execute("SELECT id FROM calib_versions WHERE id=?", (vid,)).fetchone():
+    row = db.execute("SELECT frozen FROM calib_versions WHERE id=?", (vid,)).fetchone()
+    if not row:
         return jsonify({"error": "not found"}), 404
+    # 冻结版本始终只读：不允许在原记录上改写任何字段（含 frozen 本身），
+    # 后续调整需复制或新建版本，避免覆盖历史参数
+    if row["frozen"]:
+        return jsonify({"error": "版本已冻结，只读；请复制或新建版本"}), 409
     now = time.time()
     if "name" in data:
         db.execute(
