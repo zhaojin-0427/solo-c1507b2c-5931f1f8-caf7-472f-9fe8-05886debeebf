@@ -197,16 +197,22 @@
 
   // 采用方案 → 排料条上的构件标记已下料（锁定）；消耗余料出库，新余段入余料池。
   // sticks 已排除已锁构件，只对条上实际出现的构件加锁。
+  // 幂等：同一方案重复采用不重复入库余料、不重复消耗来源。
   function adoptPlan(plan) {
+    if (plan.adopted) {
+      LG.app.toast("该方案已采用：余料已入库、构件已锁定，无需重复采用");
+      return false;
+    }
     const c = ensure(d());
-    // 1) 按快照 key 锁定本次下料的构件（清掉历史脏数据 null/undefined）
+    // 1) 按快照 key（旧方案无 key 时由边列表派生，与锁定判定用同一 key）锁定本次下料构件
     const cutKeys = new Set();
+    const keyOf = new Map(); // memberId → 实际使用的 key
     const byId = {};
     (plan.members || []).forEach((m) => { byId[m.id] = m; });
     (plan.sticks || []).forEach((s) => s.memberIds.forEach((mid) => {
       const m = byId[mid];
       const k = m && memberKey(m);
-      if (k) cutKeys.add(k);
+      if (k) { cutKeys.add(k); keyOf.set(mid, k); }
     }));
     const lockSet = new Set(c.locks.filter((k) => k));
     cutKeys.forEach((k) => lockSet.add(k));
@@ -214,23 +220,32 @@
     // 2) 用掉的库存余料出库，避免下轮重复使用
     const consumed = new Set(plan.consumedRemnants || []);
     c.remnants = c.remnants.filter((r) => !consumed.has(r.id));
-    // 3) 本次下料留下的余段入池
+    // 3) 本次下料留下的余段入池；按 id 去重，重复采用不得产生两条同 id 余料
+    const haveRm = new Set(c.remnants.map((r) => r.id));
     (plan.sticks || []).forEach((s, i) => {
       if (s.remnantLength == null) return;
+      const rid = "rm_" + plan.id + "_" + i;
+      if (haveRm.has(rid)) return;
+      haveRm.add(rid);
       c.remnants.push({
-        id: "rm_" + plan.id + "_" + i,
+        id: rid,
         specId: s.specId,
         length: s.remnantLength,
         fromPlan: plan.id,
         note: (s.source === "remnant" ? "余料条余段" : "新料余段"),
       });
     });
-    // 4) 快照锁定状态与采用结果对齐（历史方案仍可对照）
+    // 4) 快照锁定状态与采用结果对齐（含无 key 旧方案：用派生 key 判断），
+    //    保证采用后不立即被标成“已变”
     (plan.members || []).forEach((m) => {
-      if (cutKeys.has(m.key)) m.locked = true;
+      const k = keyOf.get(m.id) || memberKey(m);
+      if (k && lockSet.has(k)) m.locked = true;
     });
+    plan.adopted = true;
+    plan.adoptedAt = Date.now() / 1000;
     LG.app.requestSave();
     scheduleCompute();
+    return true;
   }
 
   // ---------- 接头编排 ----------
@@ -461,7 +476,7 @@
               余料 ${p.metrics.reusableTotal.toFixed(0)}mm</div>
             <div class="cut-hops">
               <button class="mini cut-showplan">${cur ? "✓ 对照中" : "对照"}</button>
-              <button class="mini cut-adoptplan" title="锁定方案内未锁构件，余料入池">采用</button>
+              <button class="mini cut-adoptplan" ${p.adopted ? "disabled" : ""} title="锁定方案内未锁构件，余料入池">${p.adopted ? "✓ 已采用" : "采用"}</button>
               <button class="mini danger cut-delplan">删</button>
             </div>
           </div>`;

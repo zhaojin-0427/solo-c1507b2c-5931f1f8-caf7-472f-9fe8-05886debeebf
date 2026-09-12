@@ -219,6 +219,17 @@ ok(used_stick["waste"] >= used_stick["kerfLoss"] - 1e-6,
 # 未用的余料不出现
 ok(all(s["memberIds"] for s in rp["sticks"]), "未动用余料条不产生空条记录")
 
+# 余料池脏数据：同 id 余料重复两条（重复采用的历史产物）只能被分配一次
+p = cross_payload(remnants=[
+    {"id": "rmX", "specId": "s1", "length": 900},
+    {"id": "rmX", "specId": "s1", "length": 900},
+])
+rd = C.compute(p)
+rdp = next(x for x in rd["plans"]["strategies"] if x["key"] == "remnant")
+rm_sticks = [s for s in rdp["sticks"] if s["sourceId"] == "rmX"]
+ok(len(rm_sticks) == 1, "同 id 余料只建一根库存条（实际 %d）" % len(rm_sticks))
+ok(rdp["consumedRemnants"].count("rmX") == 1, "consumedRemnants 不重复消耗同一来源")
+
 # 超尺构件无法排入 → unplaced
 p = cross_payload(specs=[dict(SPEC, stockLength=200)])
 r10 = C.compute(p)

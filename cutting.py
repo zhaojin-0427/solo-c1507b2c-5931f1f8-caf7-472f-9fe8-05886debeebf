@@ -473,10 +473,17 @@ def compute(payload):
                       m["cx"], m["cy"], {"memberId": m["id"]})
 
     # ---------- 排料（一维下料） ----------
+    # 余料池按 id 去重：同一段余料（可能由重复采用等脏数据造成）只能被分配一次
     remnants = []
+    seen_rm = set()
     for r in cut.get("remnants") or []:
-        if r.get("id") and r.get("specId") in specs and _num(r.get("length")) > 0:
-            remnants.append({"id": r["id"], "specId": r["specId"],
+        rid = r.get("id")
+        if rid in seen_rm:
+            continue
+        if rid is not None:
+            seen_rm.add(rid)
+        if r.get("specId") in specs and _num(r.get("length")) > 0:
+            remnants.append({"id": rid, "specId": r["specId"],
                              "length": _num(r.get("length"))})
 
     def pack(spec_id, mids, use_remnants, mode):

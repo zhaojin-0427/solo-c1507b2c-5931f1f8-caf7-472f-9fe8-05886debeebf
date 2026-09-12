@@ -233,6 +233,34 @@ function fakeResult() {
      "消耗余料后剩余的 480mm 余段入池");
   ok(doc.cutting.locks.includes("e1|e2"), "余料方案构件同样按 key 锁定");
 
+  // 幂等：同一方案再采用一次 —— 不重复入库、不重复消耗、不新增锁
+  const locksN = doc.cutting.locks.length;
+  const rm480before = doc.cutting.remnants.filter((r) => r.length === 480).length;
+  const again = window.LG.cutting.adoptPlan(plan2);
+  ok(again === false && plan2.adopted === true, "重复采用被幂等守卫拦截");
+  ok(doc.cutting.locks.length === locksN, "重复采用不新增锁定（%d 条）".replace("%d", doc.cutting.locks.length));
+  ok(doc.cutting.remnants.filter((r) => r.length === 480).length === rm480before,
+     "重复采用不产生第二条同 id 余料（%d 条）".replace("%d", rm480before));
+  const rmIds = doc.cutting.remnants.map((r) => r.id);
+  ok(new Set(rmIds).size === rmIds.length, "余料池无重复 id: " + JSON.stringify(rmIds));
+
+  // 无 key 旧方案（修复前保存）：采用后实时锁定与快照 locked 必须一致，不立即标“已变”
+  const res4 = fakeResult();
+  const legacyStrategy = res4.plans.strategies.find((s) => s.key === "ffd");
+  doc.cutting.remnants = [];
+  doc.cutting.locks = [];
+  const legacyPlan = await window.LG.cutting.saveStrategy(legacyStrategy, res4, "旧方案");
+  delete legacyPlan.members[0].key; // 模拟旧快照
+  ok(!legacyPlan.members[0].key, "旧方案快照无 key");
+  const ret = window.LG.cutting.adoptPlan(legacyPlan);
+  ok(ret === true, "旧方案首次采用正常执行");
+  ok(doc.cutting.locks.includes("e1|e2"), "旧方案构件由边列表派生 key 锁定");
+  ok(legacyPlan.members[0].locked === true, "旧方案快照 locked 同步为 true（用同一派生 key）");
+  // 实时结果构件已锁（服务端按 locks 返回）→ 对照不应报“已变”
+  res4.members[0].locked = true;
+  const stl = window.LG.cutting.planStaleness(legacyPlan, res4);
+  ok(!stl.stale, "旧方案采用后不立即标成已变: " + JSON.stringify(stl));
+
   // 清理
   await window.LG.app.api("DELETE", "/api/projects/" + window.LG.state.projectId);
   console.log(`\n结果：${passed} 通过，${failed} 失败`);
