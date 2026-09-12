@@ -43,6 +43,7 @@
       <button class="tab-btn active" data-tab="issues">检查</button>
       <button class="tab-btn" data-tab="piece">片属性</button>
       <button class="tab-btn" data-tab="seq">次序</button>
+      <button class="tab-btn" data-tab="calib">底稿</button>
       <button class="tab-btn" data-tab="settings">设置</button>
     </div>
 
@@ -70,6 +71,10 @@
       <div id="seqStatus"></div>
       <div id="seqViolations"></div>
       <div id="seqList"></div>
+    </div>
+
+    <div class="tab-page" id="tab-calib">
+      <div id="calibPanel"></div>
     </div>
 
     <div class="tab-page" id="tab-settings">
@@ -122,6 +127,7 @@
   <div class="print-head">
     <b>纸样预览（实际尺寸分页）</b>
     <span id="printInfo" class="muted"></span>
+    <label class="print-opt" id="printUnderlayWrap"><input type="checkbox" id="printUnderlay"> 淡印当前底稿</label>
     <span class="spacer"></span>
     <button id="doPrint">打印</button>
     <button id="closePrint">返回编辑</button>
@@ -129,11 +135,75 @@
   <div id="printPages"></div>
 </div>
 
+<!-- 现场底稿校准工作区 -->
+<div id="calibModal">
+  <div class="calib-box">
+    <div class="calib-head">
+      <b>底稿校准</b>
+      <input id="calVerName" title="方案名称">
+      <select id="calMethod" title="校正方法">
+        <option value="affine">仿射校正（≥3 点）</option>
+        <option value="perspective">透视校正（≥4 点）</option>
+      </select>
+      <span id="calBadge" class="badge ok">草稿</span>
+      <span id="calRms" class="muted"></span>
+      <span class="spacer"></span>
+      <button id="calCompute">计算校正</button>
+      <button id="calFreeze">冻结参数</button>
+      <button id="calClose">关闭</button>
+    </div>
+    <div class="calib-body">
+      <div class="calib-view">
+        <div class="calib-vtitle">
+          <span>原图 · 点击标记控制点，拖动微调</span>
+          <button id="calFitL" class="mini">⛶</button>
+        </div>
+        <div class="calib-vp" id="calVpL">
+          <div class="calib-vp-inner" id="calInnerL">
+            <img id="calImg" draggable="false" alt="原图">
+            <svg id="calSvgL"></svg>
+          </div>
+        </div>
+      </div>
+      <div class="calib-view">
+        <div class="calib-vtitle">
+          <span id="calRightTitle">校正结果（面板 mm）· 点击为选中点填坐标</span>
+          <span>
+            <button id="calFlip" class="mini">看校正前</button>
+            <button id="calFitR" class="mini">⛶</button>
+          </span>
+        </div>
+        <div class="calib-vp" id="calVpR">
+          <svg id="calSvgR"><g id="calRg"></g></svg>
+          <div class="calib-vp-inner" id="calInnerR2" style="display:none">
+            <img id="calImgR" draggable="false" alt="原图">
+            <svg id="calSvgR2"></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="calib-foot">
+      <table class="calib-table">
+        <thead><tr>
+          <th>#</th><th>图像 u (px)</th><th>图像 v (px)</th>
+          <th>面板 X (mm)</th><th>面板 Y (mm)</th>
+          <th>残差方向</th><th>像素误差</th><th>毫米误差</th>
+          <th>锁定</th><th>排除</th><th></th>
+        </tr></thead>
+        <tbody id="calTbody"></tbody>
+      </table>
+      <div class="calib-hint" id="calHint"></div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/js/geometry.js"></script>
+<script src="/static/js/calibration.js"></script>
 <script src="/static/js/checks.js"></script>
 <script src="/static/js/sequence.js"></script>
 <script src="/static/js/print.js"></script>
 <script src="/static/js/editor.js"></script>
+<script src="/static/js/calibui.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

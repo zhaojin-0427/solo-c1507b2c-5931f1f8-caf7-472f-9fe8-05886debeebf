@@ -10,7 +10,7 @@
     return e;
   }
 
-  let svg, vp, layers;
+  let svg, vp, layers, underlayClipRect;
   let drag = null;        // 节点拖动 {nodeId, moved}
   let panDrag = null;     // 平移 {sx, sy, tx, ty}
   let frameDrag = null;   // 画外框 {x0, y0}
@@ -179,15 +179,39 @@
     const d = doc(), v = st().view;
     if (!svg) return;
     applyView();
-    ["grid", "pieces", "bars", "edges", "nodes", "overlay"].forEach((k) => {
+    ["underlay", "grid", "pieces", "bars", "edges", "nodes", "overlay"].forEach((k) => {
       layers[k].textContent = "";
     });
+    renderUnderlay();
     renderGrid();
     renderPieces();
     renderBars();
     renderEdges();
     renderNodes();
     renderOverlay();
+  }
+
+  // 校正底稿：叠在铅条画布底层（网格/玻璃片之下），可调透明度与裁切范围
+  function renderUnderlay() {
+    const g = layers.underlay;
+    const u = doc().underlay, bmp = st().underlayBmp;
+    if (!u || !u.visible || !bmp) return;
+    let clip = null;
+    if (u.crop && u.crop.x1 > u.crop.x0 && u.crop.y1 > u.crop.y0) {
+      underlayClipRect.setAttribute("x", u.crop.x0);
+      underlayClipRect.setAttribute("y", u.crop.y0);
+      underlayClipRect.setAttribute("width", u.crop.x1 - u.crop.x0);
+      underlayClipRect.setAttribute("height", u.crop.y1 - u.crop.y0);
+      clip = "url(#underlayClip)";
+    }
+    const img = el("image", {
+      href: bmp.dataUrl,
+      x: bmp.bbox.x0, y: bmp.bbox.y0,
+      width: bmp.bbox.x1 - bmp.bbox.x0, height: bmp.bbox.y1 - bmp.bbox.y0,
+      opacity: u.opacity != null ? u.opacity : 0.55,
+      preserveAspectRatio: "none",
+    }, g);
+    if (clip) img.setAttribute("clip-path", clip);
   }
 
   function renderGrid() {
@@ -536,6 +560,9 @@
   }
 
   function onKeyDown(ev) {
+    // 校准工作区打开时，画布快捷键挂起
+    const cm = document.getElementById("calibModal");
+    if (cm && cm.classList.contains("show")) return;
     if (ev.target && /INPUT|TEXTAREA|SELECT/.test(ev.target.tagName)) return;
     if (ev.code === "Space") { spaceDown = true; ev.preventDefault(); return; }
     if (ev.key === "Escape") { if (!cancelDraft()) { st().selection = null; LG.app.onSelectionChanged(); } }
@@ -587,8 +614,12 @@
     init(svgEl) {
       svg = svgEl;
       vp = el("g", {}, svg);
+      // 底稿裁切用 clipPath（放在 defs，不随图层清空）
+      const defs = el("defs", {}, svg);
+      const clip = el("clipPath", { id: "underlayClip" }, defs);
+      underlayClipRect = el("rect", { x: 0, y: 0, width: 0, height: 0 }, clip);
       layers = {};
-      ["grid", "pieces", "bars", "edges", "nodes", "overlay"].forEach((k) => {
+      ["underlay", "grid", "pieces", "bars", "edges", "nodes", "overlay"].forEach((k) => {
         layers[k] = el("g", { id: "layer-" + k }, vp);
       });
       svg.addEventListener("pointerdown", onPointerDown);

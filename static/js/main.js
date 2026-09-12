@@ -23,6 +23,8 @@
       edges: [],
       pieces: [],
       sequence: { startCorner: "tl", steps: [], custom: false },
+      // 现场底稿：当前叠放的校准版本与显示状态（几何不受影响）
+      underlay: { versionId: null, visible: true, opacity: 0.55, crop: null, printFaint: false },
     };
   }
 
@@ -38,6 +40,7 @@
     snapInd: null,
     flashAt: null,
     stepHighlight: [],
+    underlayBmp: null,   // 当前底稿的重投影位图 {key,dataUrl,bbox}
     dirty: false,
   };
 
@@ -153,6 +156,7 @@
     renderIssues();
     renderPiecePanel();
     renderSeqPanel();
+    if (LG.calibui) LG.calibui.renderPanel();
     updateCounts();
   }
 
@@ -470,13 +474,17 @@
     st().doc = p.doc || defaultDoc();
     st().doc.settings = Object.assign(defaultDoc().settings, st().doc.settings || {});
     st().doc.sequence = st().doc.sequence || { startCorner: "tl", steps: [], custom: false };
+    st().doc.underlay = Object.assign(defaultDoc().underlay, st().doc.underlay || {});
     st().selection = null;
+    st().underlayBmp = null;
     $("projName").value = p.name;
     $("projModal").classList.remove("show");
     bindSettings();
     recompute();
     LG.editor.fitView();
     setSaveStatus("已加载");
+    // 恢复底稿照片与全部校准版本
+    if (LG.calibui) LG.calibui.loadProjectData(p.id);
   }
 
   async function newProject() {
@@ -521,17 +529,34 @@
     const d = doc();
     if (!d.frame) return toast("请先画外框");
     const layout = LG.print.computePages(d);
-    const box = $("printPages");
-    box.innerHTML = "";
-    layout.pages.forEach((pg) => {
-      const div = document.createElement("div");
-      div.className = "print-page";
-      div.style.width = layout.pageW + "mm";
-      div.style.height = layout.pageH + "mm";
-      div.style.padding = layout.margin + "mm";
-      div.innerHTML = LG.print.renderPageSVG(d, st().facePieces, pg, layout);
-      box.appendChild(div);
-    });
+    // 淡印当前底稿：有可用底稿时才显示选项
+    const u = d.underlay || {};
+    const canU = u.versionId != null && st().underlayBmp;
+    $("printUnderlayWrap").style.display = canU ? "" : "none";
+    $("printUnderlay").checked = !!(canU && u.printFaint);
+    const renderPages = () => {
+      const showU = canU && $("printUnderlay").checked;
+      const underlay = showU
+        ? { dataUrl: st().underlayBmp.dataUrl, bbox: st().underlayBmp.bbox, opacity: 0.15 }
+        : null;
+      const box = $("printPages");
+      box.innerHTML = "";
+      layout.pages.forEach((pg) => {
+        const div = document.createElement("div");
+        div.className = "print-page";
+        div.style.width = layout.pageW + "mm";
+        div.style.height = layout.pageH + "mm";
+        div.style.padding = layout.margin + "mm";
+        div.innerHTML = LG.print.renderPageSVG(d, st().facePieces, pg, layout, underlay);
+        box.appendChild(div);
+      });
+    };
+    $("printUnderlay").onchange = (ev) => {
+      doc().underlay.printFaint = ev.target.checked;
+      scheduleSave();
+      renderPages();
+    };
+    renderPages();
     // 动态 @page
     let stEl = $("printPageStyle");
     if (!stEl) {
@@ -604,6 +629,7 @@
   LG.app = {
     onGeomChanged, onSelectionChanged, toast, setTool, selectIssue,
     fitView: () => LG.editor.fitView(),
+    api, requestSave: scheduleSave,
   };
 
   document.addEventListener("DOMContentLoaded", boot);

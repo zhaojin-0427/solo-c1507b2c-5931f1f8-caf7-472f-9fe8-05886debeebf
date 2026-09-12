@@ -47,7 +47,7 @@
     return `<line x1="${x - s}" y1="${y}" x2="${x + s}" y2="${y}" class="reg"/><line x1="${x}" y1="${y - s}" x2="${x}" y2="${y + s}" class="reg"/>`;
   }
 
-  function renderPageSVG(doc, facePieces, page, layout) {
+  function renderPageSVG(doc, facePieces, page, layout, underlay) {
     const g = LG.g;
     const S = doc.settings;
     const dCut = S.heartWidth / 2 + S.grindAllowance / 2;
@@ -65,6 +65,15 @@
     const inCore = (x, y) => x >= core.x0 && x <= core.x1 && y >= core.y0 && y <= core.y1;
 
     let out = [];
+    // 淡印当前校正底稿（面板 mm 坐标系，与 viewBox 对齐，页面自动裁切）
+    if (underlay && underlay.dataUrl && underlay.bbox) {
+      const b = underlay.bbox;
+      out.push(
+        `<image href="${underlay.dataUrl}" x="${b.x0.toFixed(2)}" y="${b.y0.toFixed(2)}" ` +
+        `width="${(b.x1 - b.x0).toFixed(2)}" height="${(b.y1 - b.y0).toFixed(2)}" ` +
+        `opacity="${underlay.opacity != null ? underlay.opacity : 0.15}" preserveAspectRatio="none"/>`
+      );
+    }
     // 面板外框（粗）与裁切余量参考
     out.push(`<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" class="frame-outline"/>`);
 
