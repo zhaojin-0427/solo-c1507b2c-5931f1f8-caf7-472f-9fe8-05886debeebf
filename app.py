@@ -10,6 +10,7 @@ import time
 from flask import Flask, g, jsonify, render_template, request
 
 import cutting
+import solder
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "leadlight.db")
@@ -66,6 +67,16 @@ def init_db():
             frozen INTEGER NOT NULL DEFAULT 0,
             created_at REAL,
             updated_at REAL)"""
+    )
+    # 焊接排程版本：步骤快照（含节点坐标/热量参数）+ 指标；几何变化后旧版本仍可回放
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS solder_versions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            payload TEXT NOT NULL DEFAULT '{}',
+            metrics TEXT,
+            created_at REAL)"""
     )
     db.commit()
     db.close()
@@ -143,6 +154,7 @@ def delete_project(pid):
     db = get_db()
     db.execute("DELETE FROM calib_versions WHERE project_id=?", (pid,))
     db.execute("DELETE FROM calib_photos WHERE project_id=?", (pid,))
+    db.execute("DELETE FROM solder_versions WHERE project_id=?", (pid,))
     db.execute("DELETE FROM projects WHERE id=?", (pid,))
     db.commit()
     return jsonify({"ok": True})
